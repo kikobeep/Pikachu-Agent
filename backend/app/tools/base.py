@@ -37,3 +37,20 @@ class BaseTool(ABC):
     async def execute(self, arguments: dict[str, Any]) -> Any:
         """执行工具并返回结果。"""
         ...
+
+
+class ToolCall(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    arguments: dict[str, Any] | str = Field(default_factory=dict)
+
+
+class ToolResult(BaseModel):
+    tool_call_id: str
+    tool_name: str
+    status: bool 
+    output: Any = None
+    error: str | None = None
+    duration_ms: float = Field(ge=0)

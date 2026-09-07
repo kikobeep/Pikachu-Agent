@@ -17,32 +17,41 @@ def basic_tool_registry(
     workspace_root: str | Path | None = None,
     *,
     search_settings: SearchSettings | None = None,
+    tool_names: tuple[str, ...] | None = None,
     sandbox_supervisor: SandboxSupervisor | None = None,
 ) -> ToolRegistry:
-    """创建注册了全部内置工具的工具注册表。"""
+    """创建注册表；tool_names 可选择工具，省略时注册全部内置工具。"""
 
-    from .current_time import CurrentTimeTool
-    from .http_request import HttpRequestTool
-    from .list_files import ListFilesTool
-    from .read_file import ReadFileTool
-    from .shell import ShellCommandTool
-    from .web_search import WebSearchTool
-    from .write_file import WriteFileTool
+    available = {
+        "get_current_time": "CurrentTimeTool",
+        "list_files": "ListFilesTool",
+        "read_file": "ReadFileTool",
+        "write_file": "WriteFileTool",
+        "run_shell_command": "ShellCommandTool",
+        "http_request": "HttpRequestTool",
+        "web_search": "WebSearchTool",
+    }
+    selected = tuple(available) if tool_names is None else tool_names
+    unknown = set(selected) - available.keys()
+    if unknown:
+        raise ValueError(f"Unknown basic tools: {sorted(unknown)}")
+    if len(selected) != len(set(selected)):
+        raise ValueError("tool_names must not contain duplicates")
 
     registry = ToolRegistry()
-    registry.register(CurrentTimeTool())
-    registry.register(ListFilesTool(workspace_root))
-    registry.register(ReadFileTool(workspace_root))
-    registry.register(WriteFileTool(workspace_root))
-    registry.register(
-        ShellCommandTool(
-            workspace_root,
-            sandbox_supervisor=sandbox_supervisor,
-        )
-    )
-    registry.register(HttpRequestTool())
-    registry.register(WebSearchTool(settings=search_settings))
+    for name in selected:
+        tool_class = __getattr__(available[name])
+        if name == "web_search":
+            tool = tool_class(settings=search_settings)
+        elif name == "run_shell_command":
+            tool = tool_class(workspace_root, sandbox_supervisor=sandbox_supervisor)
+        elif name in {"list_files", "read_file", "write_file"}:
+            tool = tool_class(workspace_root)
+        else:
+            tool = tool_class()
+        registry.register(tool)
     return registry
+
 
 __all__ = [
     "CurrentTimeTool",
