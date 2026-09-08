@@ -6,41 +6,36 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.models.types import ToolDefinition, ToolPermission
-
-from ..base import BaseTool
+from ..base import BaseTool, ToolDefinition, ToolPermission
 
 
 class CurrentTimeTool(BaseTool):
     """返回系统本地时间或指定 IANA 时区的当前时间。"""
+
     @property
     def definition(self) -> ToolDefinition:
-
-    definition = ToolDefinition(
-        name="get_current_time",
-        record_output=False,
-        description=(
-            "Get the actual current date and time on demand. Use this before "
-            "answering questions involving today, tomorrow, yesterday, now, "
-            "recent dates, deadlines, or relative time. If no timezone is given, "
-            "the Vesta process local timezone is used. This is read-only and "
-            "does not require approval."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "timezone": {
-                    "type": "string",
-                    "description": (
-                        "Optional IANA timezone, such as Asia/Shanghai or "
-                        "America/New_York."
-                    ),
-                }
+        return ToolDefinition(
+            name="get_current_time",
+            description=(
+                "按需获取当前实际日期和时间。回答涉及今天、明天、昨天、"
+                "现在、近期日期、截止时间或相对时间的问题前，应先调用此工具。"
+                "未指定时区时使用进程所在系统的本地时区。"
+                "此工具只读，无需人工审批。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "timezone": {
+                        "type": "string",
+                        "description": (
+                            "可选的 IANA 时区，例如 Asia/Shanghai 或 America/New_York。"
+                        ),
+                    }
+                },
+                "additionalProperties": False,
             },
-            "additionalProperties": False,
-        },
-        permission=ToolPermission.ALLOWED,
-    )
+            permission=ToolPermission.ALLOWED,
+        )
 
     async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
         timezone = arguments.get("timezone")

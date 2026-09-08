@@ -42,17 +42,13 @@ class HttpRequestTool(BaseTool):
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="http_request",
-            description=(
-                "Make an HTTP GET/POST/HEAD request to a public URL and return "
-                "the status code, response headers, and body text. "
-                "Requires human approval."
-            ),
+            description="向公网 URL 发送 HTTP GET、POST 或 HEAD 请求，返回状态码、响应头和响应正文。需要人工审批。",
             parameters={
                 "type": "object",
                 "properties": {
                     "url": {
                         "type": "string",
-                        "description": "The http(s) URL to request.",
+                        "description": "要请求的 HTTP 或 HTTPS URL。",
                     },
                     "method": {
                         "type": "string",
@@ -61,18 +57,15 @@ class HttpRequestTool(BaseTool):
                     },
                     "headers": {
                         "type": "object",
-                        "description": "Optional request headers as string values.",
+                        "description": "可选的请求头，各字段的值须为字符串。",
                     },
                     "body": {
                         "type": "string",
-                        "description": "Optional request body (for POST).",
+                        "description": "可选的请求正文，用于 POST 请求。",
                     },
                     "timeout_seconds": {
                         "type": "number",
-                        "description": (
-                            f"Request timeout in seconds (capped at "
-                            f"{MAX_HTTP_TIMEOUT_SECONDS:g})."
-                        ),
+                        "description": f"请求超时时间，单位为秒，上限为 {MAX_HTTP_TIMEOUT_SECONDS:g} 秒。",
                     },
                 },
                 "required": ["url"],

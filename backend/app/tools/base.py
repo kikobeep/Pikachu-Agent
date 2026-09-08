@@ -1,4 +1,6 @@
 """工具的数据定义与执行接口。"""
+from dataclasses import dataclass, field
+from app.types import AgentMode, ToolCall
 from enum import StrEnum
 from abc import ABC, abstractmethod
 from typing import Any
@@ -39,14 +41,6 @@ class BaseTool(ABC):
         ...
 
 
-class ToolCall(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    name: str
-    arguments: dict[str, Any] | str = Field(default_factory=dict)
-
-
 class ToolResult(BaseModel):
     tool_call_id: str
     tool_name: str
@@ -54,3 +48,17 @@ class ToolResult(BaseModel):
     output: Any = None
     error: str | None = None
     duration_ms: float = Field(ge=0)
+
+@dataclass(frozen=True, slots=True)
+class ToolExecutionContext:
+    """一次工具调用在执行链中的共享上下文。"""
+
+    tool_call: ToolCall
+    run_id: str | None = None
+    conversation_id: str | None = None
+    user_input: str | None = None
+    step: int | None = None
+    tool_definition: ToolDefinition | None = None
+    arguments: dict[str, Any] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    mode: AgentMode | None = None

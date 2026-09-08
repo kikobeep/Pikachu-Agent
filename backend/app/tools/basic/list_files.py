@@ -22,15 +22,13 @@ class ListFilesTool(BaseTool):
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="list_files",
-            description="List files recursively inside the local workspace.",
+            description="递归列出本地工作区中的文件。",
             parameters={
                 "type": "object",
                 "properties": {
                     "directory": {
                         "type": "string",
-                        "description": (
-                            "Optional subdirectory relative to the workspace."
-                        ),
+                        "description": "可选的子目录路径，相对于工作区。",
                         "default": ".",
                     }
                 },

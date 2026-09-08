@@ -20,13 +20,13 @@ class ReadFileTool(BaseTool):
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="read_file",
-            description="Read a UTF-8 text file inside the local workspace.",
+            description="读取本地工作区中的 UTF-8 文本文件。",
             parameters={
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path relative to the workspace.",
+                        "description": "相对于工作区的文件路径。",
                     }
                 },
                 "required": ["path"],

@@ -37,31 +37,21 @@ class ShellCommandTool(BaseTool):
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="run_shell_command",
-            description=(
-                "Run a shell command inside the local workspace and return "
-                "its exit code, stdout, and stderr. Requires human approval."
-            ),
+            description="在本地工作区中执行 Shell 命令，返回退出码、标准输出和标准错误。需要人工审批。",
             parameters={
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "The shell command to execute.",
+                        "description": "要执行的 Shell 命令。",
                     },
                     "working_directory": {
                         "type": "string",
-                        "description": (
-                            "Optional subdirectory (relative to the workspace) "
-                            "in which to run the command. Defaults to the "
-                            "workspace root."
-                        ),
+                        "description": "可选的命令执行目录，相对于工作区；默认使用工作区根目录。",
                     },
                     "timeout_seconds": {
                         "type": "number",
-                        "description": (
-                            "Maximum seconds to wait before terminating. "
-                            f"Capped at {MAX_SHELL_TIMEOUT_SECONDS:g}."
-                        ),
+                        "description": f"命令执行的最长等待时间，超时后终止，单位为秒，上限为 {MAX_SHELL_TIMEOUT_SECONDS:g} 秒。",
                     },
                 },
                 "required": ["command"],

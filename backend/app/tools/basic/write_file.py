@@ -20,17 +20,17 @@ class WriteFileTool(BaseTool):
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="write_file",
-            description="Write UTF-8 text to a file inside the local workspace.",
+            description="向本地工作区中的文件写入 UTF-8 文本。",
             parameters={
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path relative to the workspace.",
+                        "description": "相对于工作区的文件路径。",
                     },
                     "content": {
                         "type": "string",
-                        "description": "Complete text content to write.",
+                        "description": "要写入的完整文本内容。",
                     },
                 },
                 "required": ["path", "content"],

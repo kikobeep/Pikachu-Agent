@@ -32,25 +32,18 @@ class WebSearchTool(BaseTool):
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="web_search",
-            description=(
-                "Search the web and return source titles, URLs, concise snippets, "
-                "relevance scores when available. This is "
-                "a read-only tool and does not require approval. Cite the returned "
-                "sources in the final answer. Use a few focused searches instead "
-                "of repeating broad query variations. For relative dates, call "
-                "get_current_time first instead of assuming the current date."
-            ),
+            description="搜索网页，返回来源标题、URL、简短摘要及可用的相关性评分。此工具只读，当前需要人工审批。最终回答应引用返回的来源。使用少量聚焦的搜索，避免反复变换宽泛的查询。涉及相对日期时，应先调用 get_current_time 获取当前时间，不要自行假定日期。",
             parameters={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The focused search query.",
+                        "description": "聚焦、明确的搜索词。",
                         "maxLength": MAX_QUERY_CHARS,
                     },
                     "max_results": {
                         "type": "integer",
-                        "description": "Maximum number of results.",
+                        "description": "最多返回的结果数量。",
                         "default": self._max_results,
                         "minimum": 1,
                         "maximum": self._max_results,
@@ -63,7 +56,7 @@ class WebSearchTool(BaseTool):
                     "time_range": {
                         "type": "string",
                         "enum": ["day", "week", "month", "year"],
-                        "description": "Optional recency filter.",
+                        "description": "可选的时间范围筛选条件。",
                     },
                     "include_domains": {
                         "type": "array",
@@ -81,7 +74,7 @@ class WebSearchTool(BaseTool):
             },
             # 可选参数不满足 OpenAI 严格模式“全部字段必须 required”的约束，
             # 参数正确性由 SearchRequest 在本地统一验证。
-            permission=ToolPermission.ALLOWED,
+            permission=ToolPermission.HUMAN_APPROVAL,
         )
 
     @property
