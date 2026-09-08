@@ -9,7 +9,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from app.conversation import DEFAULT_DATABASE_PATH
+DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[2] / ".databse" / "sidekick.db"
 
 from .summary import ConversationSummaryState, RollingConversationSummary
 
@@ -41,27 +41,23 @@ class SQLiteConversationSummaryStore:
     async def load(
         self,
         conversation_id: str,
-    ) -> dict[str,Any] | None:
+    ) -> ConversationSummaryState | None:
         """读取会话当前生效的滚动摘要。"""
         if conversation_id is None:
             raise KeyError("查询摘要的conversation_id不能为空")
         
-        async with aiosqlite.connect(self.database_path) as db:
-             row = await database.execute(
-                """
-                SELECT summary_json, covered_message_count
-                FROM conversation_summaries
-                WHERE conversation_id = ?
-                """,
+        async with self._connect() as db:
+            async with db.execute(
+                "SELECT summary_json, covered_message_count FROM conversation_summaries WHERE conversation_id = ?",
                 (conversation_id,),
-            ).fetchone()
+            ) as cursor:
+                row = await cursor.fetchone()
         if row is None:
             return None
-        return {
-                "summary": RollingConversationSummary.model_validate_json(row[0]),
-                "covered_message_count": row[1],
-            }
-        
+        return ConversationSummaryState(
+            summary=RollingConversationSummary.model_validate_json(row[0]),
+            covered_message_count=row[1],
+        )
 
     async def save(
         self,
@@ -94,9 +90,43 @@ class SQLiteConversationSummaryStore:
             await database.commit()
 
     async def delete(self, conversation_id: str) -> bool:
-        
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "DELETE FROM conversation_summaries WHERE conversation_id = ?",
+                (conversation_id,),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
 
-    
+    @asynccontextmanager
+    async def _connect(self) -> AsyncIterator[aiosqlite.Connection]:
+        async with aiosqlite.connect(self.database_path) as db:
+            await db.execute("PRAGMA foreign_keys = ON")
+            yield db
 
 
-__all__ = ["SQLiteConversationSummaryStore"]
+async def main() -> None:
+    store = SQLiteConversationSummaryStore(DEFAULT_DATABASE_PATH.with_name("summary_test.db"))
+    await store.initialize()
+    conversation_id = "test"
+
+    # 摘要需要关联一条会话记录。
+    async with aiosqlite.connect(store.database_path) as db:
+        await db.execute("CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY)")
+        await db.execute("INSERT OR IGNORE INTO conversations (id) VALUES (?)", (conversation_id,))
+        await db.commit()
+
+    state = ConversationSummaryState(
+        summary=RollingConversationSummary(current_objective="完成模型接入"),
+        covered_message_count=2,
+    )
+    await store.save(conversation_id, state)
+    result = await store.load(conversation_id)
+    print(f"数据库：{store.database_path}")
+    print(result.model_dump_json(indent=2) if result is not None else "未找到摘要")
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    asyncio.run(main())

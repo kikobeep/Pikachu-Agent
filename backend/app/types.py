@@ -26,6 +26,7 @@ class ToolCall(BaseModel):
 
 
 class Message(BaseModel):
+    name: str | None = None
     role: MessageRole
     content: str | None = None
     reasoning: str | None = None

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.types import Message, MessageRole, ModelUsage
+from app.types import Message, MessageRole, ModelUsage
 
 SUMMARY_MESSAGE_NAME = "rolling_summary"
 
