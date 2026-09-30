@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
-from app.types import AgentMode
+from app.model.config import AgentMode
 
 PLAN_MODE_ALLOWED_TOOLS = frozenset(
     {

@@ -1,3 +1,11 @@
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
 class Conversation(BaseModel):
     """一个可恢复的本地聊天会话。"""
 

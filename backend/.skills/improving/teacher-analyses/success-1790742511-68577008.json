@@ -1,0 +1,21 @@
+{
+  "analysis_type": "success",
+  "created_at": 1790742511.148201,
+  "run_ids": [
+    "c91bc5c2fa374d1d957da342c5597793",
+    "b257f62a90da4d28a9b4613a64b56531",
+    "289fd4855b42460f838be6ae7c67afe9",
+    "d570b4e19d094959971107f764907f7d",
+    "b712e7643f8d4a63a0a39d991299dac7",
+    "f3c98e27fc0849fcad1778fe2906ddd6",
+    "9b90c5aaf3a549429d8e71cce7d97601",
+    "d6d55eb6bb374ef3b25ac87894254cc7",
+    "367ccd57d04f4a99ad54671a3aa2d987",
+    "3d1862ca227a4b929e511fa5a80173d4",
+    "ca6801ad9ef347f09bfaba8bc40c2c47",
+    "f24117554c9c4233b5982cf7abe2f8a2",
+    "9215184d4ef042bba9f42483ffb9d49d",
+    "312a7724678a4ee386189d25a7916f3d"
+  ],
+  "analysis": "# 成功轨迹分析（Exercism JS 首轮通过）\n\n以下仅基于 12 个 Run 的 user_request、trace_summary、evidence 提炼，且只保留在 ≥2 个独立 Run 中重复出现的做法。\n\n## 一、可复用做法\n\n### 1. 先读环境再动手（几乎全部 Run）\n- 顺序：`list_files` 看目录 → `read_file` 读 `package.json` → 读目标 stub 文件。\n- 在 grep、rectangles 等题中还额外读了 `data/` 下的输入文件或 `babel.config.js`。\n- 作用：确认模块系统（ESM/CJS）、导出形式、可用依赖，避免写出与评测环境不兼容的代码。\n\n### 2. 只改目标实现文件，不碰测试文件\n- 所有 Run 都只 `write_file` 目标文件（如 `grep.js`、`triangle.js`），从未创建或修改正式测试文件。\n- 自测一律写到临时文件（`selftest.mjs` / `selftest.tmp.js` / `dbg.mjs`），与正式测试隔离。\n\n### 3. 自建临时自测脚本，覆盖题目规则与边界\n- 多个 Run（triangle、say、space-age、poker、pig-latin、tournament、complex-numbers、killer-sudoku-helper）都写了独立 `selftest.mjs`，用 `assert`/自定义 `check` 逐条断言。\n- 覆盖点反复出现：空输入、无匹配、边界值、组合 flag、大小写、排序/并列、越界报错。\n- 验证信号：脚本输出 `PASS/FAIL` 或 `all N assertions passed`，且退出码为 0。\n\n### 4. 用“独立参考实现”做交叉验证（≥3 个 Run）\n- rectangles、pig-latin、scale-generator、ledger 都另写了一份独立参考实现（`reference.mjs` / `dbg.mjs` / `original-reference.mjs`），与主实现对比。\n- rectangles 甚至做了随机 + 结构化交叉检查（“3000 diagrams agree / 1500 diagrams agree”）。\n- 作用：当题目规则有歧义（如 rectangles 的“宽松边框规则”）时，用第二实现暴露理解偏差。\n\n### 5. 失败后定位根因再改，而非盲改\n- 典型：先跑自测看到 FAIL → 用 `node -e` 或 `dbg.mjs` 打印中间状态（如 grep 的 `od -c` 查行尾、ledger 的 `codePointAt` 查货币符号、space-age 的 `toFixed` 浮点行为）→ 确认是“实现错”还是“自测期望错” → 再修。\n- 多个 Run 出现“修正自测期望值而非改实现”的情况（poker 的 full house、killer-sudoku 的 sum 边界、ledger 的截断长度），说明区分二者很关键。\n\n### 6. 完成后清理临时文件并确认目录干净\n- 几乎所有 Run 结尾都执行 `rm -f selftest.mjs ... && ls -a`，确认只剩 `LICENSE / babel.config.js / package.json / 目标文件`。\n- 验证信号：`ls -a` 输出中无临时文件残留。\n\n### 7. 保留 stub 的导出契约与 shebang\n- 目标文件保留原有导出形式（`export class` / `export const` / `export function`）和 `#!/usr/bin/env node` shebang（grep）。\n- poker 结尾还专门 `node -e \"import('./poker.js').then(m => console.log(typeof m.bestHands))\"` 确认导出仍可用。\n\n## 二、适用条件\n\n- 适用于：Exercism 类“给定 stub + 隐藏测试”的 JS 单文件实现题。\n- 交叉验证（做法 4）适用于规则存在歧义或组合爆炸的题（rectangles、scale-generator、ledger）；对规则明确的简单题（triangle、say）不必强加。\n- 临时自测（做法 3）适用于任何有明确输入输出契约的题；但自测期望必须来自题目描述，不能凭直觉，否则会像 poker/killer-sudoku 那样先写错期望。\n- 清理（做法 6）适用于评测方会检查工作区整洁的场景；若评测只看目标文件则非必需，但成本低、无副作用。\n\n## 三、验证信号（说明步骤确实有效）\n\n- 自测脚本退出码为 0 且输出全 `PASS` / `all assertions passed`。\n- 交叉验证输出“agree / 无差异”。\n- 导出检查输出 `export ok: function` 等，确认接口未被破坏。\n- 结尾 `ls -a` 显示目录仅含预期文件。\n- 出现 FAIL 后能定位到具体断言并解释原因（实现错 vs 期望错），而非反复试错。\n\n## 四、无稳定模式的部分\n\n- 具体命令、函数名、临时文件名（`selftest.mjs` vs `selftest.tmp.js`）、是否用 `python3` 改文件、是否用 `web_search`（多次被拒）在各 Run 间不一致，不作为可复用结论。\n- 未观察到稳定的“先写哪部分逻辑”的固定顺序，故不提炼固定流程。"
+}

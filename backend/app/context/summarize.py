@@ -1,32 +1,52 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
-from typing import Any
-from app.types import Message, MessageRole
-from app.model.adapter import ModelAdapter
-from app.model.type import ModelProvider, ModelRequest
-from .summary import RollingConversationSummary, SummaryGenerationResult
-
 from abc import ABC, abstractmethod
-_MAX_OBJECTIVE_CHARS = 160
-_PREFERRED_ENTRIES_PER_FIELD = 5
+from collections.abc import Sequence
+from typing import Any, TYPE_CHECKING
+
+from app.model.config import Message, MessageRole, ModelProvider, ModelRequest
+
+from .summary import RollingConversationSummary, SummaryFact, SummaryGenerationResult
+
+if TYPE_CHECKING:
+    from app.model.adapter import ModelAdapter
+
+_MAX_GOAL_CHARS = 160
 _MAX_ENTRIES_PER_FIELD = 8
 _MAX_ENTRY_CHARS = 80
-_MAX_SUMMARY_CONTENT_CHARS = 1_200
-_SUMMARY_SYSTEM_PROMPT = """你是会话压缩器，把旧摘要和新增历史合并成紧凑结构化摘要。
+_MAX_SUMMARY_CONTENT_CHARS = 1_600
+_MAX_FACTS = 128
+_SUMMARY_SYSTEM_PROMPT = """You maintain an evolving factual playbook for a long conversation.
 
-要求：
-- 只输出一个 JSON 对象，不要输出 Markdown、解释或任何思考过程；
-- 只能保留输入中明确存在的信息，禁止补充、推断或编造事实；
-- 只保留后续继续任务需要的信息，删除重复与冗余内容；
-- 不要推测或复制外部 Task Snapshot 的步骤状态，Task 是独立事实源；
-- 重要工具原文若带 evidence_id，只保留“用途 + 完整 evidence_id”引用，不复制
-  大段原文，也不能缩写或修改 ID；后续可用 evidence_read 重新读取；
-- 每个数组最多 5 条，每条不超过 80 个中文字符；
-- 当前目标不超过 200 个字符，全部字段内容合计不超过 2000 个字符；
-- 没有内容的字段使用 null 或空数组；
-- 摘要必须明显短于输入历史。"""
+Return only one JSON object. Do not output Markdown, explanations, or reasoning.
+
+Output schema:
+{
+  "operations": [
+    {
+      "action": "ADD | UPDATE | MERGE | DROP",
+      "id": "F001 or an existing fact id",
+      "category": "person | preference | event | purchase | date | quantity | relationship | decision | other",
+      "fact": "One atomic, explicit fact in English",
+      "confidence": 0.0,
+      "source": "short source hint such as messages 12-13",
+      "merge_ids": ["existing duplicate ids; only for MERGE"]
+    }
+  ]
+}
+
+Rules:
+- Extract only facts explicitly supported by the new messages. Never guess.
+- Split different facts into separate entries; preserve exact names, dates, numbers, counts, prices, and ordering.
+- Use ADD for a new fact, UPDATE when the same fact changed, MERGE for duplicates, and DROP only when a fact is explicitly invalidated or contradicted.
+- For UPDATE, MERGE, and DROP, use the exact existing fact id from previous_summary.
+- Do not delete an old fact merely because it is not mentioned in the new messages.
+- Do not summarize the conversation into goals or vague topics.
+- Return at most 32 operations; each fact must be concise but complete.
+- All fact text must be in English.
+"""
+
 
 class ContextSummarizer(ABC):
     @abstractmethod
@@ -42,7 +62,7 @@ class ModelContextSummarizer(ContextSummarizer):
     def __init__(
         self,
         model_adapter: ModelAdapter,
-        model_provider:ModelProvider,
+        model_provider: ModelProvider,
         model: str | None = None,
         max_output_tokens: int = 1024,
     ):
@@ -50,7 +70,9 @@ class ModelContextSummarizer(ContextSummarizer):
         self.model_provider = model_provider
         self.model = model
         self.max_output_tokens = max_output_tokens
-    
+        self.provider_hint = model_provider.value
+        self.model_hint = model or model_adapter.default_model
+
     async def summarize(
         self,
         previous_summary: RollingConversationSummary | None,
@@ -60,65 +82,83 @@ class ModelContextSummarizer(ContextSummarizer):
             previous_summary,
             messages,
         )
-    
+
+    async def retry_compact(
+        self,
+        previous_summary: RollingConversationSummary | None,
+        messages: Sequence[Message],
+        *,
+        reason: str,
+    ) -> SummaryGenerationResult:
+        """首次摘要失败后的唯一重试入口；默认复用原摘要实现。"""
+
+        return await self.summarize(previous_summary, messages)
+
     async def _summarize(
         self,
         previous_summary: RollingConversationSummary | None,
         messages: Sequence[Message]
-    ):
+    ) -> SummaryGenerationResult:
         payload = {
-            "previous_summary":(
+            "previous_summary": (
                 previous_summary.model_dump(mode="json")
                 if previous_summary is not None
                 else None
             ),
-            "history_messages":[
+            "history_messages": [
                 {
                     "role": message.role.value,
                     "content": message.content,
+                    "tool_calls": [call.model_dump(mode="json") for call in message.tool_calls],
+                    "tool_call_id": message.tool_call_id,
                 }
                 for message in messages
             ],
-            "schema": RollingConversationSummary.model_json_schema()
+            "schema": {
+                "operations": "array of ADD, UPDATE, MERGE, DROP operations",
+                "existing_fact_ids": [
+                    fact.id
+                    for fact in (previous_summary.facts if previous_summary else ())
+                ],
+            },
         }
         request = ModelRequest(
-            messages = (
+            messages=(
                 Message(
-                    role = MessageRole.SYSTEM,
-                    content = _SUMMARY_SYSTEM_PROMPT
+                    role=MessageRole.SYSTEM,
+                    content=_SUMMARY_SYSTEM_PROMPT
                 ),
                 Message(
-                    role = MessageRole.USER,
-                    content = json.dumps(payload,ensure_ascii=False)
+                    role=MessageRole.USER,
+                    content=json.dumps(payload, ensure_ascii=False)
 
                 )
             ),
-            model = self.model,
-            max_output_tokens = self.max_output_tokens,
+            model=self.model,
+            max_output_tokens=self.max_output_tokens,
             extra_body=(
                 {"thinking": {"type": "disabled"}}
                 if self.model_provider == ModelProvider.DEEPSEEK else {}
             )
         )
-       
-        output = await self.model_adapter.complete(request = request)
+
+        output = await self.model_adapter.complete(request=request)
         if output.finish_reason in ("length", "max_output_tokens", "incomplete", "failed"):
             raise ValueError("summary model response was incomplete")
-        if not output.response.content:
+        # ModelAdapter returns the unified ModelResponse shape.  The
+        # assistant text is stored on ``message.content`` for both chat
+        # completions and responses-style adapters; ``response`` was an old
+        # pre-unification field and breaks DeepSeek summarization.
+        content = output.message.content or ""
+        if not content:
             raise ValueError("summary model returned empty content")
-        result = _parse_json(output.response.content)
-        summary = RollingConversationSummary.model_validate(result)
-        _check_summary(summary)
+        result = _parse_json(content)
+        summary = _curate_fact_operations(previous_summary, result)
         return SummaryGenerationResult(summary=summary, usage=output.usage)
-        
-        
 
 
 def _parse_json(content: str) -> dict[str, Any]:
     text = content.strip()
-    # 模型可能返回：```json
-    #{"current_objective": "实现 CLI"}
-    #```
     if text.startswith("```"):
         lines = text.splitlines()[1:]
         if lines and lines[-1].strip() == "```":
@@ -135,19 +175,22 @@ def _parse_json(content: str) -> dict[str, Any]:
 def _check_summary(summary: RollingConversationSummary) -> None:
     """对模型摘要执行硬限制，不能只依赖 Prompt 软约束。"""
 
-    if summary.current_objective and len(summary.current_objective) > _MAX_OBJECTIVE_CHARS:
+    if summary.goal and len(summary.goal) > _MAX_GOAL_CHARS:
         raise ValueError(
-            f"current_objective exceeds {_MAX_OBJECTIVE_CHARS} characters"
+            f"goal exceeds {_MAX_GOAL_CHARS} characters"
         )
     entry_fields = (
-        "user_constraints",
+        "constraints",
+        "done",
+        "in_progress",
+        "blocked",
         "key_decisions",
-        "completed_work",
-        "current_state",
-        "pending_work",
-        "important_facts",
+        "next_steps",
+        "critical_context",
+        "read_files",
+        "modified_files",
     )
-    total_chars = len(summary.current_objective or "")
+    total_chars = len(summary.goal or "")
     for field_name in entry_fields:
         entries = getattr(summary, field_name)
         if len(entries) > _MAX_ENTRIES_PER_FIELD:
@@ -164,10 +207,85 @@ def _check_summary(summary: RollingConversationSummary) -> None:
         raise ValueError(
             f"summary content exceeds {_MAX_SUMMARY_CONTENT_CHARS} characters"
         )
-    
+
+
+def _curate_fact_operations(
+    previous_summary: RollingConversationSummary | None,
+    result: dict[str, Any],
+) -> RollingConversationSummary:
+    """Apply model-proposed deltas deterministically (ACE-style curator)."""
+
+    facts: dict[str, SummaryFact] = {
+        fact.id: fact
+        for fact in (previous_summary.facts if previous_summary else ())
+    }
+    operations = result.get("operations", [])
+    if not isinstance(operations, list):
+        raise ValueError("summary operations must be an array")
+
+    next_id = max(
+        [
+            int(fact_id[1:])
+            for fact_id in facts
+            if fact_id.startswith("F") and fact_id[1:].isdigit()
+        ]
+        or [0]
+    ) + 1
+    for raw in operations[:32]:
+        if not isinstance(raw, dict):
+            continue
+        action = str(raw.get("action", "")).upper().strip()
+        fact_id = str(raw.get("id", "")).strip()
+        if action == "ADD" and (not fact_id or fact_id in facts):
+            while f"F{next_id:03d}" in facts:
+                next_id += 1
+            fact_id = f"F{next_id:03d}"
+            next_id += 1
+        if action == "DROP":
+            if fact_id:
+                facts.pop(fact_id, None)
+            continue
+        if action in {"UPDATE", "MERGE"} and fact_id not in facts:
+            # A malformed update must not erase data; treat it as a new fact.
+            action = "ADD"
+            while f"F{next_id:03d}" in facts:
+                next_id += 1
+            fact_id = f"F{next_id:03d}"
+            next_id += 1
+        if action not in {"ADD", "UPDATE", "MERGE"}:
+            continue
+        fact_text = _normalize_text(str(raw.get("fact", "")))
+        if not fact_text:
+            continue
+        facts[fact_id] = SummaryFact(
+            id=fact_id,
+            category=_normalize_text(str(raw.get("category", "other"))) or "other",
+            fact=fact_text,
+            confidence=float(raw.get("confidence", 1.0)),
+            source=(
+                _normalize_text(str(raw["source"]))
+                if raw.get("source") is not None
+                else None
+            ),
+        )
+        if action == "MERGE":
+            merge_ids = raw.get("merge_ids", [])
+            if isinstance(merge_ids, list):
+                for duplicate_id in merge_ids:
+                    if duplicate_id != fact_id and isinstance(duplicate_id, str):
+                        facts.pop(duplicate_id, None)
+
+    ordered = tuple(facts.values())[-_MAX_FACTS:]
+    return RollingConversationSummary(facts=ordered)
+
+
+def _normalize_text(value: str) -> str:
+    return " ".join(value.split()).strip()
+
 
 async def main() -> None:
     import argparse
+
     from app.model.adapter import ModelCompatibleAdapter
     from app.model.config import ModelConfig
 
@@ -179,8 +297,9 @@ async def main() -> None:
     settings = ModelConfig()
     config = settings.load_provider_config(args.provider or settings.model_default_provider)
     previous = RollingConversationSummary(
-        current_objective="给个人记账工具增加账单导出功能",
-        pending_work=("实现导出接口", "添加导出按钮"),
+        goal="给个人记账工具增加账单导出功能",
+        in_progress=("实现导出接口",),
+        next_steps=("添加导出按钮",),
     )
     messages = (
             Message(

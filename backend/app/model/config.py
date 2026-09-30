@@ -1,10 +1,36 @@
-from .type import ApiStyle, ModelProvider
-from pathlib import Path
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, SecretStr
+from __future__ import annotations
+
+from enum import StrEnum
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.tools.config import ToolDefinition
+
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".config"
+
+class ApiStyle(StrEnum):
+    RESPONSES = "responses"
+    CHAT_COMPLETIONS = "chat_completions"
+
+
+class ModelProvider(StrEnum):
+    OPENAI = "openai"
+    QWEN = "qwen"
+    DEEPSEEK = "deepseek"
+    ANTHROPIC = "anthropic"
+
 
 class ProviderConfig(BaseModel):
     """用于创建单个适配器的完整配置。"""
@@ -105,4 +131,100 @@ class ModelConfig(BaseSettings):
             default_max_output_tokens=self.model_default_max_output_tokens,
         )
 
+class ModelRequest(BaseModel):
+    """可转换为任意已配置模型提供商格式的请求。"""
 
+    model_config = ConfigDict(extra="forbid")
+
+    messages: tuple[Message, ...]
+    model: str | None = None
+    tools: tuple[ToolDefinition, ...] = ()
+    tool_choice: str | None = None
+    temperature: float | None = None
+    max_output_tokens: int | None = Field(default=None, gt=0)
+    extra_body: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def require_messages(self) -> ModelRequest:
+        if not self.messages:
+            raise ValueError("messages cannot be empty")
+        return self
+
+class ModelUsage(BaseModel):
+    """一次或多次模型调用的用量。
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cached_input_tokens: int | None = Field(default=None, ge=0)
+    uncached_input_tokens: int | None = Field(default=None, ge=0)
+    cache_read_input_tokens: int | None = Field(default=None, ge=0)
+    cache_write_input_tokens: int | None = Field(default=None, ge=0)
+    model_calls: int = Field(default=0, ge=0)
+
+
+class ModelResponse(BaseModel):
+    """所有模型适配器统一返回的结果。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    provider: str
+    model: str
+    message: Message
+    finish_reason: str | None = None
+    usage: ModelUsage = Field(default_factory=ModelUsage)
+    raw: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentMode(StrEnum):
+    DEFAULT = "default"
+    PLAN = "plan"
+
+
+class MessageRole(StrEnum):
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+    TOOL = "tool"
+
+class ToolCall(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    arguments: dict[str, Any] | str = Field(default_factory=dict)
+
+
+class Message(BaseModel):
+    name: str | None = None
+    role: MessageRole
+    content: str | None = None
+    reasoning: str | None = None
+    tool_call_name: str | None = None
+    tool_call_id: str | None = None
+    tool_calls: tuple[ToolCall, ...] = ()
+
+
+def rebuild_models() -> None:
+    """重建包含跨模块前向引用的模型。
+
+    ModelRequest 依赖 Message / ToolCall；ToolCall 在本模块，但 ModelRequest.tools
+    里出现的 ToolDefinition 来自 app.tools.config，不能在 config.py 内 rebuild。
+    调用前需要先 import app.tools.config 以将 ToolDefinition 注入模块 globals。
+    """
+
+    ModelRequest.model_rebuild()
+
+
+# 在 module 末尾惰性 import：此时 app.tools.config 已全部载入，ToolDefinition
+# 已绑定到全局命名空间，可以安全地触发跨模块前向引用重建。
+try:
+    from app.tools.config import ToolDefinition  # noqa: F401
+    ModelRequest.model_rebuild()
+except ImportError:
+    # 第一次被 tools.config 反向 import 时 app.tools.config 尚未完成，跳过。
+    pass

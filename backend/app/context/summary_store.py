@@ -9,7 +9,7 @@ from pathlib import Path
 
 import aiosqlite
 
-DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[2] / ".databse" / "sidekick.db"
+DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[2] / ".database" / "sidekick.db"
 
 from .summary import ConversationSummaryState, RollingConversationSummary
 
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS conversation_summaries (
 """
 
 
-class SQLiteConversationSummaryStore:
+class ConversationSummaryStore:
     """保存模型请求使用的摘要缓存，不替代完整消息历史。"""
 
     def __init__(self, database_path: str | Path = DEFAULT_DATABASE_PATH) -> None:
@@ -106,7 +106,7 @@ class SQLiteConversationSummaryStore:
 
 
 async def main() -> None:
-    store = SQLiteConversationSummaryStore(DEFAULT_DATABASE_PATH.with_name("summary_test.db"))
+    store = ConversationSummaryStore(DEFAULT_DATABASE_PATH.with_name("summary_test.db"))
     await store.initialize()
     conversation_id = "test"
 
@@ -117,7 +117,7 @@ async def main() -> None:
         await db.commit()
 
     state = ConversationSummaryState(
-        summary=RollingConversationSummary(current_objective="完成模型接入"),
+        summary=RollingConversationSummary(goal="完成模型接入"),
         covered_message_count=2,
     )
     await store.save(conversation_id, state)

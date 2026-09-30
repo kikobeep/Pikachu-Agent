@@ -6,13 +6,13 @@ import json
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-
 from typing import Any
 
-from ..types import Message, MessageRole, ModelUsage, ToolCall
-from ..tools.base import ToolDefinition
+from app.model.config import Message, MessageRole, ToolCall
+from app.model.config import ApiStyle, ModelRequest, ModelResponse, ModelUsage
+from app.tools.config import ToolDefinition
+
 from .config import ProviderConfig
-from .type import ApiStyle, ModelRequest, ModelResponse
 
 
 @dataclass(slots=True)
@@ -91,7 +91,15 @@ class ModelCompatibleAdapter(ModelAdapter):
                 return await self._complete_response(request)
             return await self._complete_chat(request)
         except Exception as exc:
-            raise RuntimeError(f"{self.provider} model request failed: {exc}") from exc
+            # Preserve the low-level network/API cause for CLI diagnostics
+            # without exposing request headers or the API key.
+            cause = exc.__cause__ or exc.__context__
+            detail = str(exc)
+            if cause and str(cause) and str(cause) != detail:
+                detail = f"{detail} ({cause})"
+            raise RuntimeError(
+                f"{self.provider} model request failed: {detail}"
+            ) from exc
 
     async def complete_stream(
         self,
@@ -125,7 +133,7 @@ class ModelCompatibleAdapter(ModelAdapter):
                     continue
 
                 raise RuntimeError(
-                    f"{self.provider} model stream failed: {exc}"
+                    f"{self.provider} model stream failed: {type(exc).__name__}: {exc}"
                 ) from exc
 
     async def close(self) -> None:
@@ -171,8 +179,11 @@ class ModelCompatibleAdapter(ModelAdapter):
             kwargs["temperature"] = request.temperature
         if request.max_output_tokens is not None:
             kwargs["max_tokens"] = request.max_output_tokens
-        if request.extra_body:
-            kwargs["extra_body"] = request.extra_body
+        extra_body = dict(request.extra_body)
+        if self.provider == "deepseek" and "thinking" not in extra_body:
+            extra_body["thinking"] = {"type": "disabled"}
+        if extra_body:
+            kwargs["extra_body"] = extra_body
         response = await self._client.chat.completions.create(**kwargs)
         return _parse_chat(response,self.provider)
 
@@ -198,8 +209,11 @@ class ModelCompatibleAdapter(ModelAdapter):
             kwargs["temperature"] = request.temperature
         if request.max_output_tokens is not None:
             kwargs["max_tokens"] = request.max_output_tokens
-        if request.extra_body:
-            kwargs["extra_body"] = request.extra_body
+        extra_body = dict(request.extra_body)
+        if self.provider == "deepseek" and "thinking" not in extra_body:
+            extra_body["thinking"] = {"type": "disabled"}
+        if extra_body:
+            kwargs["extra_body"] = extra_body
 
         events = await self._client.chat.completions.create(**kwargs)
         status.stream_opened = True
@@ -211,6 +225,13 @@ class ModelCompatibleAdapter(ModelAdapter):
         calls: dict[int, dict[str, str]] = {}
         finish_reason = None
         usage = None
+        '''
+        chunk                         一次收到的数据块
+            └─ choices[0]
+                └─ delta                   本次新增的内容
+                    ├─ content              正文片段
+                    └─ tool_calls           工具调用片段列表
+        '''
         async for chunk in events:
             response_id = chunk.id or response_id
             model = chunk.model or model
@@ -262,7 +283,7 @@ class ModelCompatibleAdapter(ModelAdapter):
             id=response_id,
             provider=self.provider,
             model=model,
-            response=Message(
+            message=Message(
                 role=MessageRole.ASSISTANT,
                 content="".join(text_parts) or None,
                 tool_calls=tuple(tool_calls),
@@ -420,7 +441,7 @@ def _parse_response(response: Any, provider: str) -> ModelResponse:
         id=response.id,
         provider=provider,
         model=response.model,
-        response=Message(
+        message=Message(
             role=MessageRole.ASSISTANT,
             content=response.output_text or None,
             tool_calls=tool_calls,
@@ -448,7 +469,7 @@ def _parse_chat(response: Any, provider: str) -> ModelResponse:
         id=response.id,
         provider=provider,
         model=response.model,
-        response=Message(
+        message=Message(
             role=MessageRole.ASSISTANT,
             content=getattr(message, "content", None),
             tool_calls=tool_calls,
@@ -509,7 +530,11 @@ def _usage(usage: Any, input_field: str, output_field: str, details_field: str) 
     )
 
 
-def _parse_arguments(arguments: str) -> dict[str, Any] | str:
+def _parse_arguments(arguments: str | dict[str, Any]) -> dict[str, Any] | str:
+    if isinstance(arguments, dict):
+        return arguments
+    if not isinstance(arguments, str):
+        return {}
     try:
         parsed = json.loads(arguments)
     except json.JSONDecodeError:
@@ -521,6 +546,7 @@ def _parse_arguments(arguments: str) -> dict[str, Any] | str:
 
 async def main() -> None:
     import argparse
+
     from .config import ModelConfig
 
     parser = argparse.ArgumentParser(description="手动测试模型调用")

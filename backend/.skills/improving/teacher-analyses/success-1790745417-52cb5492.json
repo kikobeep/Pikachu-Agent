@@ -1,0 +1,19 @@
+{
+  "analysis_type": "success",
+  "created_at": 1790745417.66978,
+  "run_ids": [
+    "4c02a6b1a7794db199e21bdddfa45032",
+    "4f2197a2bfb643979b2d258d7b465a44",
+    "387266ad54a3451081d9339c28ea3c8d",
+    "9b6d8efe007848aab826514485acacfd",
+    "ca61f3826e9e4eeaa335f87aecc572b9",
+    "e694f51b6ac2443895136084310e3f5d",
+    "c91bc5c2fa374d1d957da342c5597793",
+    "b257f62a90da4d28a9b4613a64b56531",
+    "289fd4855b42460f838be6ae7c67afe9",
+    "d570b4e19d094959971107f764907f7d",
+    "b712e7643f8d4a63a0a39d991299dac7",
+    "f3c98e27fc0849fcad1778fe2906ddd6"
+  ],
+  "analysis": "# 成功轨迹分析：Exercism JS 单文件实现类任务\n\n以下结论仅基于 10 个首轮 passed 的 Run（complex-numbers ×3、binary、house、connect、affine-cipher、grep、zebra-puzzle、triangle、tournament、space-age）。只保留在 ≥2 个独立 Run 中重复出现的做法。\n\n## 一、可复用做法（多 Run 重复出现）\n\n### 1. 先读环境再动手（几乎全部 Run）\n- 顺序稳定为：`skill_read` → `list_files` → `read_file(stub)` + `read_file(package.json)`（部分 Run 还读 `babel.config.js`）。\n- 作用：确认导出契约（`export class X` / `export const f`）、模块类型（ESM）、以及是否已有测试运行器。\n- 适用条件：任何\"给定 stub 文件 + 隐藏测试\"的单文件实现任务。\n\n### 2. 保留 stub 的导出契约与文件头注释\n- 所有 Run 都保留原 stub 的 `export class/const` 名称与签名，并保留顶部 skeleton 注释。\n- 多个 Run 在收尾时用 `grep -n \"Remove this statement\" <file>` 确认没有残留 stub 抛错语句（binary、connect、affine-cipher、house 明确做了这一步）。\n- 作用：隐藏测试按原契约导入，签名/导出名一旦改动即失败。\n- 适用条件：stub 已给出导出名与签名时；不适用于需要自行设计接口的任务。\n\n### 3. 写一个临时自测脚本，用 `node` 直接跑（全部 Run）\n- 统一模式：新建临时文件（`selftest.mjs` / `tmp_selftest.mjs` / `selftest.tmp.js` 等），`import` 被测模块，用 `PASS/FAIL` 或断言计数输出，`node <file>` 运行。\n- 关键点：临时脚本名与正式测试文件不同，且**不放进正式测试路径**。\n- 适用条件：隐藏测试不可见、但需要本地快速反馈时。\n\n### 4. 失败后先定位再改，而非盲改（house、connect、affine-cipher、zebra-puzzle、tournament、space-age）\n- 出现 FAIL 后，先跑一个**最小诊断命令**（`node -e` 打印中间值、`grep` 定位字段、单独打印某行长度/某函数返回值），确认是\"实现错\"还是\"自测期望写错\"。\n- affine-cipher 明确区分了\"实现 bug\"与\"自测期望值写错\"，并修正自测期望；zebra-puzzle 通过打印内部字段定位到 `waterDrinker` 映射错误。\n- 适用条件：自测出现失败且原因不明时。\n\n### 5. 收尾清理临时文件并核对目录（全部 Run）\n- 统一动作：`rm -f <临时文件>` 后 `ls -a`，确认工作区只剩 `LICENSE / babel.config.js / package.json / <目标>.js`。\n- 作用：避免临时文件被评测方误当作测试或干扰。\n- 适用条件：任何在仓库内创建过临时文件的场景。\n\n### 6. 用\"题目原文/示例\"作为期望值来源（house、tournament、connect、binary）\n- house 从题目文本切出 verse 期望；tournament 用题目示例输入输出；connect 用题目棋盘示例。\n- 作用：期望值来自题面而非臆测，减少自测本身出错。\n- 适用条件：题面包含明确示例或逐字文本时。\n\n## 二、被正确保留且对成功有明确作用的约束\n\n| 约束 | 保留方式 | 作用 |\n|---|---|---|\n| 导出契约（类名/函数名/签名） | 不改 stub 导出 | 隐藏测试能正确 import |\n| 只改目标文件 | 只 `write_file` 目标 `.js`，不碰测试文件 | 满足\"不要创建/修改测试文件\" |\n| ESM 模块 | 自测用 `.mjs` 或 `import` | 与 `package.json` 模块类型一致 |\n| 无 stub 残留 | 收尾 `grep \"Remove this statement\"` | 防止未实现分支被触发 |\n| 工作区干净 | 收尾 `rm` + `ls -a` | 避免污染评测环境 |\n\n## 三、可迁移到未来同类任务的做法\n\n**适用条件（同时满足才推荐）：**\n- 任务是\"给定 stub 文件 + 隐藏测试\"的单文件实现；\n- 题面提供了明确规则/示例；\n- 环境有 `node` 可直接运行。\n\n**推荐迁移：**\n1. 读 stub + `package.json` 确认契约与模块类型。\n2. 保留导出名/签名与文件头。\n3. 写独立临时自测脚本，用 `node` 跑，期望值取自题面。\n4. 失败先做最小诊断，区分实现错 vs 期望错。\n5. 收尾 `grep` 查 stub 残留 + `rm` 临时文件 + `ls -a` 核对。\n\n**不适用/不要泛化：**\n- 具体临时文件名、具体命令（`npx jest` vs `node`）、具体函数名、具体输入值——这些是偶然的，不应作为固定流程。\n- 当任务需要自行设计接口、或题面无示例时，第 2、6 条不适用。\n- 当环境无 `node` 或测试运行器不同（如 jest 超时）时，应改用可用的运行方式，而非照搬 `node`。\n\n## 四、能说明步骤确实有效的验证信号\n\n- **自测脚本输出全 PASS / `ALL TESTS PASSED` / `exit=0`**：多个 Run 以此为完成信号（complex-numbers、triangle、tournament、space-age、binary、connect）。\n- **失败→诊断→修复→再跑转绿**：connect、affine-cipher、zebra-puzzle、tournament、space-age 都出现\"先 FAIL 后 PASS\"的收敛过程，说明诊断步骤有效。\n- **`grep \"Remove this statement\"` 返回 exit 1（无匹配）**：binary、connect、affine-cipher、house 用它确认 stub 已完全替换。\n- **收尾 `ls -a` 只剩预期文件**：全部 Run 用它确认无临时文件残留。\n- **诊断命令输出与手算一致**：affine-cipher 用 `tmp_check.mjs` 手算验证公式，space-age 用 `node -e` 验证 `toFixed` 行为，说明中间值可被独立复核。\n\n## 五、无稳定模式的部分\n\n- 是否使用 `npx jest` 还是纯 `node`：各 Run 不一致（部分 jest 超时后改用 `node`），**不构成稳定模式**。\n- 是否使用 `skill_read` 的具体 skill 名：出现多个不同 skill 名，**不泛化**。\n- 是否使用 `python3` 辅助生成/修改期望值：仅 house、affine-cipher、grep 出现，样本不足，**不作为通用建议**。"
+}

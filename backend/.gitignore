@@ -2,3 +2,9 @@
 .env
 __pycache__/
 .config
+.database/
+.memory/
+.skills/
+.ruff_cache/
+/eval/
+
