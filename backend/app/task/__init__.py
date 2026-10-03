@@ -13,14 +13,14 @@ from .config import (
 from .context import TaskContextProvider
 from .store import (
     DEFAULT_TASKS_DIR,
-    TaskStore,
+    PlanStore,
 )
 from .tools import (
     TaskCreateTool,
     TaskGetTool,
     TaskListTool,
     TaskUpdateTool,
-    register_task_tools,
+    register_plan_tools,
 )
 
 __all__ = [
@@ -36,8 +36,8 @@ __all__ = [
     'TaskStatus',
     'TaskStep',
     'TaskStepStatus',
-    'TaskStore',
+    'PlanStore',
     'TaskToolOutputAttributionResolver',
     'TaskUpdateTool',
-    'register_task_tools',
+    'register_plan_tools',
 ]

@@ -1,12 +1,12 @@
-"""任务管理工具：供主模型在长任务中创建、更新、查询任务。
+"""计划管理工具：供主模型在长任务中创建、更新、查询计划。
 
-任务状态独立于会话消息持久化，不受上下文压缩影响。工具把 Task 领域能力
+计划状态独立于会话消息持久化，不受上下文压缩影响。工具把 Plan 领域能力
 暴露给模型，让模型能够：
 
-- ``task_create``：为一个整体目标创建任务，并把目标内的子工作拆成步骤；
-- ``task_update``：步骤完成、状态变化、补充约束/事实或关联执行记录时更新任务；
-- ``task_get``：需要重新确认单个任务当前状态时获取详情；
-- ``task_list``：需要总览任务（含用户明确要求列出）时获取列表。
+- ``plan_create``：为一个整体目标创建计划，并把目标内的子工作拆成步骤；
+- ``plan_update``：步骤完成、状态变化、补充约束/事实或关联执行记录时更新计划；
+- ``plan_get``：需要重新确认单个计划当前状态时获取详情；
+- ``plan_list``：需要总览计划（含用户明确要求列出）时获取列表。
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from app.tools.config import BaseTool, ToolDefinition
 from app.tools.register import ToolRegistry
 
 from ..tools.config import ToolExecutionContext
-from .store import TaskStore
+from .store import PlanStore
 
 _MAX_LIST_LIMIT = 100
 
@@ -35,13 +35,13 @@ _MAX_LIST_LIMIT = 100
 class TaskCreateTool(BaseTool):
     """创建用于长期跟踪进度的任务。"""
 
-    def __init__(self, store: TaskStore) -> None:
+    def __init__(self, store: PlanStore) -> None:
         self._store = store
 
     @property
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
-            name="task_create",
+            name="plan_create",
             record_output=False,
             description=(
                 "创建一个任务用于长期跟踪一个整体目标。当工作复杂需要拆解、跨多轮"
@@ -145,31 +145,31 @@ class TaskCreateTool(BaseTool):
                 else ()
             ),
         )
-        return task.model_dump(mode="json")
+        return _plan_payload(task)
 
 
 class TaskUpdateTool(BaseTool):
     """更新任务：推进步骤、改变状态、补充约束/事实或关联执行记录。"""
 
-    def __init__(self, store: TaskStore) -> None:
+    def __init__(self, store: PlanStore) -> None:
         self._store = store
 
     @property
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
-            name="task_update",
+            name="plan_update",
             record_output=False,
             description=(
                 "更新一个已有任务。当某个步骤完成、任务状态变化、需要补充用户"
                 "约束或关键事实时调用。当前会话和运行由系统自动关联；至少提供 "
-                "task_id 与一个更新字段。更新系统注入的当前活动任务时，优先把 "
-                "task_id 设为 current，避免转录长 ID；其他任务仍使用精确 ID 或"
+                "plan_id 与一个更新字段。更新系统注入的当前活动计划时，优先把 "
+                "plan_id 设为 current，避免转录长 ID；其他计划仍使用精确 ID 或"
                 "唯一前缀。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "task_id": {
+                    "plan_id": {
                         "type": "string",
                         "description": (
                             "任务 ID、唯一前缀，或当前活动任务句柄 current。"
@@ -252,7 +252,7 @@ class TaskUpdateTool(BaseTool):
                         ),
                     },
                 },
-                "required": ["task_id"],
+                "required": ["plan_id"],
                 "additionalProperties": False,
             },
             strict=False,
@@ -275,9 +275,9 @@ class TaskUpdateTool(BaseTool):
         *,
         context: ToolExecutionContext | None,
     ) -> dict[str, Any]:
-        task_id = arguments.get("task_id")
-        if not isinstance(task_id, str) or not task_id.strip():
-            raise ValueError("'task_id' must be a non-empty string")
+        plan_id = arguments.get("plan_id")
+        if not isinstance(plan_id, str) or not plan_id.strip():
+            raise ValueError("'plan_id' must be a non-empty string")
 
         has_update = any(
             key in arguments
@@ -294,7 +294,7 @@ class TaskUpdateTool(BaseTool):
         )
         if not has_update:
             raise ValueError(
-                "task_update requires at least one update field besides task_id"
+                "plan_update requires at least one update field besides plan_id"
             )
 
         if context is not None and context.mode is AgentMode.PLAN:
@@ -385,7 +385,7 @@ class TaskUpdateTool(BaseTool):
             )
 
         conversation_id = _require_conversation_id(context)
-        task = await _resolve_owned(self._store, task_id, conversation_id)
+        task = await _resolve_owned(self._store, plan_id, conversation_id)
 
         patch_data: dict[str, Any] = {
             "status": status,
@@ -413,19 +413,19 @@ class TaskUpdateTool(BaseTool):
             owner_conversation_id=conversation_id,
         )
 
-        return task.model_dump(mode="json")
+        return _plan_payload(task)
 
 
 class TaskGetTool(BaseTool):
     """获取单个任务的完整详情，用于重新确认当前状态。"""
 
-    def __init__(self, store: TaskStore) -> None:
+    def __init__(self, store: PlanStore) -> None:
         self._store = store
 
     @property
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
-            name="task_get",
+            name="plan_get",
             record_output=False,
             description=(
                 "获取一个任务的完整详情（目标、状态、步骤、约束、关键事实与关联"
@@ -435,14 +435,14 @@ class TaskGetTool(BaseTool):
             parameters={
                 "type": "object",
                 "properties": {
-                    "task_id": {
+                    "plan_id": {
                         "type": "string",
                         "description": (
                             "任务 ID、唯一前缀，或当前活动任务句柄 current。"
                         ),
                     }
                 },
-                "required": ["task_id"],
+                "required": ["plan_id"],
                 "additionalProperties": False,
             },
             strict=False,
@@ -464,24 +464,24 @@ class TaskGetTool(BaseTool):
         *,
         context: ToolExecutionContext | None,
     ) -> dict[str, Any]:
-        task_id = arguments.get("task_id")
-        if not isinstance(task_id, str) or not task_id.strip():
-            raise ValueError("'task_id' must be a non-empty string")
+        plan_id = arguments.get("plan_id")
+        if not isinstance(plan_id, str) or not plan_id.strip():
+            raise ValueError("'plan_id' must be a non-empty string")
         conversation_id = _require_conversation_id(context)
-        task = await _resolve_owned(self._store, task_id, conversation_id)
-        return task.model_dump(mode="json")
+        task = await _resolve_owned(self._store, plan_id, conversation_id)
+        return _plan_payload(task)
 
 
 class TaskListTool(BaseTool):
     """列出任务，可按状态过滤。"""
 
-    def __init__(self, store: TaskStore) -> None:
+    def __init__(self, store: PlanStore) -> None:
         self._store = store
 
     @property
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
-            name="task_list",
+            name="plan_list",
             record_output=False,
             description=(
                 "列出任务（可按状态过滤）。当需要总览当前有哪些任务、查看进度，"
@@ -548,7 +548,7 @@ class TaskListTool(BaseTool):
         }
 
 
-def register_task_tools(registry: ToolRegistry, store: TaskStore) -> None:
+def register_plan_tools(registry: ToolRegistry, store: PlanStore) -> None:
     """把任务管理工具注册进已有工具注册表。"""
 
     registry.register(TaskCreateTool(store))
@@ -557,10 +557,9 @@ def register_task_tools(registry: ToolRegistry, store: TaskStore) -> None:
     registry.register(TaskListTool(store))
 
 
-
 async def _resolve_owned(
-    store: TaskStore,
-    task_id: str,
+    store: PlanStore,
+    plan_id: str,
     conversation_id: str,
 ) -> Task:
     """先按当前会话归属过滤，再解析任务 ID 或唯一前缀。
@@ -569,16 +568,16 @@ async def _resolve_owned(
     其他会话中任务的存在性。
     """
 
-    normalized = task_id.strip()
+    normalized = plan_id.strip()
     if normalized.lower() == "current":
-        task = await store.active_for_conversation(conversation_id)
+        task = await store.active_plan_for_conversation(conversation_id)
     else:
         task = await store.resolve(
             normalized,
             owner_conversation_id=conversation_id,
         )
     if task is None:
-        raise KeyError(f"任务不存在：{task_id}")
+        raise KeyError(f"计划不存在：{plan_id}")
     return task
 
 
@@ -594,7 +593,7 @@ def _require_conversation_id(
 
 def _task_brief(task: Task) -> dict[str, Any]:
     return {
-        "id": task.id,
+        "plan_id": task.id,
         "title": task.title,
         "status": task.status.value,
         "priority": task.priority.value,
@@ -602,6 +601,12 @@ def _task_brief(task: Task) -> dict[str, Any]:
         "progress": task.progress_summary,
         "updated_at": task.updated_at.isoformat(),
     }
+
+
+def _plan_payload(task: Task) -> dict[str, Any]:
+    payload = task.model_dump(mode="json")
+    payload["plan_id"] = payload.pop("id")
+    return payload
 
 
 def _build_steps(raw_steps: object) -> tuple[TaskStep, ...]:
@@ -664,5 +669,5 @@ __all__ = [
     "TaskGetTool",
     "TaskListTool",
     "TaskUpdateTool",
-    "register_task_tools",
+    "register_plan_tools",
 ]

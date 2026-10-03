@@ -1,1 +1,9 @@
-/eval/
+/eval/*
+
+!/eval/run_polyglot_eval.py
+!/eval/run_skill_improve.py
+
+workspace/
+
+.database/
+.ruff_cache/

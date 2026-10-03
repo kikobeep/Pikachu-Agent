@@ -1,8 +1,9 @@
-"""Sidekick CLI 展示与模型设置：直接使用 ModelConfig 和 .config 文件。"""
+"""Pikachu CLI 展示与模型设置：直接使用 ModelConfig 和 .config 文件。"""
 from __future__ import annotations
 
 import asyncio
 import getpass
+import json
 import os
 import shutil
 import sys
@@ -31,16 +32,21 @@ _PROVIDER_LABELS = {
 }
 
 
-def print_banner(*, output_fn: Callable[[str], Any] = print) -> None:
-    """Print a compact, fixed-width Claude-style welcome panel."""
+def print_banner(
+    *,
+    output_fn: Callable[[str], Any] = print,
+    status: Sequence[tuple[str, str]] = (),
+) -> None:
+    """Print the Pikachu welcome panel with optional live runtime status."""
     use_color = output_fn is print and not os.environ.get("NO_COLOR")
 
     def style(text: str, code: str) -> str:
         return f"\033[{code}m{text}\033[0m" if use_color else text
 
-    left_width = 28
-    right_width = 40
-    inner_width = 75
+    terminal_width = shutil.get_terminal_size((100, 24)).columns
+    inner_width = max(76, min(terminal_width - 4, 160))
+    left_width = 36
+    right_width = max(32, inner_width - left_width - 7)
 
     def cell(text: str, width: int, code: str) -> str:
         # Pad before adding ANSI escapes so terminal alignment stays exact.
@@ -62,39 +68,63 @@ def print_banner(*, output_fn: Callable[[str], Any] = print) -> None:
         ("Memory-aware assistant", "38;5;248"),
         ("    + tools + reflection", "38;5;245"),
     ]
-    right = [
+    right: list[tuple[str, str]] = [("⚡ PIKA STATUS", "1;38;5;216")]
+    if status:
+        right.extend(
+            (f"{label:<9} {value}", "38;5;252")
+            for label, value in status
+        )
+    else:
+        right.extend([
+            ("Model     loading", "38;5;252"),
+            ("Power     standby", "38;5;252"),
+            ("Context   waiting", "38;5;252"),
+            ("Mode      setup", "38;5;252"),
+        ])
+    right.extend([
+        ("", "38;5;245"),
         ("Tips for getting started", "1;38;5;216"),
-        ("/help      list commands", "38;5;117"),
-        ("/new       start a fresh conversation", "38;5;117"),
-        ("/memories  inspect long-term memory", "38;5;117"),
-        ("/trace     inspect a run and reflection", "38;5;117"),
+        ("/help       list commands", "38;5;117"),
+        ("/new        start a fresh conversation", "38;5;117"),
+        ("/memories   inspect long-term memory", "38;5;117"),
+        ("/trace      inspect a run and reflection", "38;5;117"),
         ("", "38;5;245"),
         ("Type a message to begin.", "3;38;5;245"),
-    ]
+    ])
 
     lines = [
         "",
         style(
             "╭"
-            + ("─ Sidekick CLI · local agent workspace"[: inner_width - 2]).ljust(
+            + ("─ Pikachu CLI · local agent workspace"[: inner_width - 2]).ljust(
                 inner_width - 2, "─"
             )
             + "╮",
             "1;38;5;216",
         ),
     ]
+    border = style("│", "38;5;216")
     for index in range(max(len(left), len(right))):
         left_text, left_code = left[index] if index < len(left) else ("", "38;5;245")
         right_text, right_code = right[index] if index < len(right) else ("", "38;5;245")
         lines.append(
-            "│ "
+            border + " "
             + cell(left_text, left_width, left_code)
-            + " │ "
+            + " " + border + " "
             + cell(right_text, right_width, right_code)
-            + " │"
+            + " " + border
         )
-    lines.extend([style("╰" + "─" * (inner_width - 2) + "╯", "38;5;238"), ""])
+    lines.extend([style("╰" + "─" * (inner_width - 2) + "╯", "38;5;216"), ""])
     output_fn("\n".join(lines))
+
+
+def format_power_bar(used_tokens: int, capacity_tokens: int, *, width: int = 10) -> str:
+    """Render remaining context capacity as a compact Pikachu power bar."""
+    capacity = max(1, capacity_tokens)
+    used = max(0, min(used_tokens, capacity))
+    remaining_percent = round((capacity - used) / capacity * 100)
+    filled = round(remaining_percent / 100 * width)
+    return f"{'█' * filled}{'░' * (width - filled)} {remaining_percent}%"
 
 
 def print_startup_status(
@@ -106,19 +136,14 @@ def print_startup_status(
         getattr(sys.stdout, "isatty", lambda: False)()
         and not os.environ.get("NO_COLOR")
     )
-    label_colors = {
-        "主模型": "38;5;117",      # blue
-        "会话": "38;5;183",        # purple
-        "搜索": "38;5;114",        # green
-        "长期记忆": "38;5;221",    # yellow
-    }
+    accent_color = "38;5;117"
 
     def style(text: str, code: str) -> str:
         return f"\033[{code}m{text}\033[0m" if use_color else text
 
     print()
     for label, value in rows:
-        label_text = style(f"  {label}：", label_colors.get(label, "38;5;250"))
+        label_text = style(f"  • {label}：", f"1;{accent_color}")
         print(f"{label_text}{style(value, '38;5;252')}")
     for notice in notices:
         print(f"{style('  提醒：', '38;5;214')}{notice}")
@@ -216,7 +241,7 @@ async def run_setup(
                 )
             else:
                 output_fn(f"连接成功：{selected.value}/{model} · {elapsed:.0f}ms")
-        return await _confirm("现在进入 Sidekick？[Y/n] ", input_fn)
+        return await _confirm("现在进入 Pikachu？[Y/n] ", input_fn)
     except (EOFError, KeyboardInterrupt):
         output_fn("\n设置已取消。")
         return False
@@ -298,95 +323,162 @@ async def _test_connection(settings: ModelConfig, provider: ModelProvider) -> fl
         await adapter.close()
 
 
-def print_agent_event(event: AgentEvent) -> None:
-    """把 Runtime 事件转换为简洁的终端进度信息。"""
+def _ui_style(text: str, code: str) -> str:
+    """Apply terminal color only when the CLI is attached to a TTY."""
+    if not getattr(sys.stdout, "isatty", lambda: False)() or os.environ.get("NO_COLOR"):
+        return text
+    return f"\033[{code}m{text}\033[0m"
 
-    event_time = event.event_time.astimezone().strftime("%H:%M:%S")
-    prefix = f"[{event_time}]"
-    if event.type == 'agent_started':
-        print(f"{prefix} Agent 开始执行")
-    elif event.type == 'model_started':
-        print(f"{prefix} 第 {event.step} 步：正在请求模型")
-    elif event.type == 'model_completed':
+
+def _compact_ui_value(value: Any, *, limit: int = 260) -> str:
+    """Keep tool arguments/results readable without flooding the terminal."""
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list, tuple)):
+        try:
+            text = json.dumps(value, ensure_ascii=False, separators=(", ", ": "))
+        except (TypeError, ValueError):
+            text = str(value)
+    else:
+        text = str(value)
+    text = " ".join(text.split())
+    if len(text) > limit:
+        return text[: limit - 1] + "…"
+    return text
+
+
+def _print_event_block(
+    title: str,
+    lines: Sequence[str] = (),
+    *,
+    color: str = "38;5;245",
+    title_color: str = "38;5;252",
+) -> None:
+    """Render one loop event as a Claude-style vertical block."""
+    bar = _ui_style("│", color)
+    print()
+    print(f"{bar} {_ui_style(title, title_color)}")
+    for line in lines:
+        for physical_line in str(line).splitlines() or [""]:
+            print(f"{bar}   {physical_line}")
+
+
+def print_agent_event(event: AgentEvent) -> None:
+    """把 Runtime 事件渲染成按 loop 步骤分隔的终端事件块。"""
+
+    step = f" · step {event.step}" if event.step is not None else ""
+    if event.type == "agent_started":
+        _print_event_block("assistant · started", ["开始执行当前 Run"], color="38;5;114")
+    elif event.type == "model_started":
+        lines = ["正在请求模型"]
+        if event.compaction_stage not in (None, "none"):
+            lines.append(f"上下文处理：{event.compaction_stage}")
+        if event.prepared_input_tokens is not None:
+            lines.append(f"输入≈{event.prepared_input_tokens} tokens")
+        _print_event_block(
+            f"model · running{step}", lines, color="38;5;117", title_color="38;5;117"
+        )
+    elif event.type == "model_completed":
         tool_count = len(event.message.tool_calls) if event.message else 0
         if tool_count:
-            print(f"{prefix} 模型请求调用 {tool_count} 个工具")
+            names = ", ".join(call.name for call in event.message.tool_calls)
+            _print_event_block(
+                f"model · tool calls{step}",
+                [f"请求 {tool_count} 个工具：{names}"],
+                color="38;5;117", title_color="38;5;117",
+            )
         else:
-            print(f"{prefix} 模型已返回回复")
-    elif event.type == 'run_budget_warning':
-        print(
-            f"{prefix} Run 用量进入预警区："
-            f"{event.run_budget_chargeable_tokens or 0} tokens · "
-            f"{event.run_budget_model_calls or 0} calls"
+            _print_event_block(
+                "model · completed", ["模型已返回回复"],
+                color="38;5;117", title_color="38;5;117",
+            )
+    elif event.type == "run_budget_warning":
+        _print_event_block(
+            "budget · warning",
+            [f"{event.run_budget_chargeable_tokens or 0} tokens · {event.run_budget_model_calls or 0} calls"],
+            color="38;5;214", title_color="38;5;214",
         )
-    elif event.type == 'run_budget_finalizing':
-        print(f"{prefix} Run 用量达到收口线，正在生成最终答复")
-    elif event.type == 'run_budget_exceeded':
-        print(f"{prefix} Run 用量达到硬上限，停止继续请求模型")
-    elif event.type == 'tool_started' and event.tool_call:
-        print(f"{prefix} 开始执行工具：{event.tool_call.name}")
-    elif event.type == 'tool_completed' and event.tool_result:
+    elif event.type == "run_budget_finalizing":
+        _print_event_block("budget · finalizing", ["达到收口线，正在生成最终答复"], color="38;5;214", title_color="38;5;214")
+    elif event.type == "run_budget_exceeded":
+        _print_event_block("budget · exceeded", ["达到硬上限，停止继续请求模型"], color="38;5;203", title_color="38;5;203")
+    elif event.type == "tool_started" and event.tool_call:
+        arguments = _compact_ui_value(event.tool_call.arguments)
+        _print_event_block(
+            f"tool {event.tool_call.name} · running{step}",
+            [f"参数：{arguments}" if arguments else "正在调用工具"],
+        )
+    elif event.type == "tool_completed" and event.tool_result:
         status = "成功" if event.tool_result.success else "失败"
-        print(
-            f"{prefix} 工具 {event.tool_result.tool_name} {status} "
-            f"({event.tool_result.duration_ms:.1f}ms)"
+        result_lines = [f"耗时：{event.tool_result.duration_ms:.1f}ms"]
+        output = _compact_ui_value(
+            event.tool_result.output if event.tool_result.success else event.tool_result.error
         )
-    elif event.type == 'tool_approval_required' and event.tool_call:
-        print(f"{prefix} 工具等待人工审批：{event.tool_call.name}")
-    elif event.type == 'tool_approval_completed' and event.tool_call:
-        decision = (
-            event.approval_decision.value
-            if event.approval_decision is not None
-            else "unknown"
+        if output:
+            result_lines.append(f"结果：{output}")
+        result_color = "38;5;114" if event.tool_result.success else "38;5;203"
+        _print_event_block(
+            f"tool {event.tool_result.tool_name} · {status}",
+            result_lines, color=result_color, title_color=result_color,
         )
-        rule_text = (
-            f" · 规则：{event.rule_description}"
-            if event.rule_description is not None
-            else ""
+    elif event.type == "tool_approval_required" and event.tool_call:
+        _print_event_block(
+            f"permission · requested · {event.tool_call.name}",
+            ["等待人工审批"], color="38;5;214", title_color="38;5;214",
         )
-        print(
-            f"{prefix} 工具权限检查完成：{event.tool_call.name} · {decision}{rule_text}"
+    elif event.type == "tool_approval_completed" and event.tool_call:
+        decision = event.approval_decision.value if event.approval_decision else "unknown"
+        rule = event.rule_description or "权限检查完成"
+        decision_color = "38;5;114" if decision in {"allow", "allowed"} else "38;5;214"
+        _print_event_block(
+            f"permission · {decision} · {event.tool_call.name}",
+            [f"规则：{rule}"], color=decision_color, title_color=decision_color,
         )
-    elif event.type == 'memory_reflection_started':
-        print(f"{prefix} 正在整理本轮长期记忆")
-    elif event.type == 'memory_reflection_completed':
+    elif event.type == "memory_reflection_started":
+        _print_event_block("memory · reflection", ["正在整理本轮长期记忆"], color="38;5;183", title_color="38;5;183")
+    elif event.type == "memory_reflection_completed":
         action = event.reflection_action or "none"
-        suffix = (
-            f" · {event.reflection_memory_id}"
-            if event.reflection_memory_id is not None
-            else ""
-        )
-        print(f"{prefix} 长期记忆整理完成：{action}{suffix}")
-    elif event.type == 'memory_reflection_failed':
-        print(f"{prefix} 长期记忆整理失败，已跳过")
-    elif event.type == 'memory_reflection_skipped':
-        reason = event.reflection_skip_reason or "policy"
-        print(f"{prefix} 长期记忆整理已跳过：{reason}")
-    elif event.type == 'memory_archive_started':
-        print(f"{prefix} 长期记忆容量不足，正在选择可归档候选")
-    elif event.type == 'memory_archive_completed':
+        suffix = f" · {event.reflection_memory_id}" if event.reflection_memory_id else ""
+        _print_event_block("memory · reflection completed", [f"动作：{action}{suffix}"], color="38;5;183", title_color="38;5;183")
+    elif event.type == "memory_reflection_failed":
+        _print_event_block("memory · reflection failed", ["整理失败，已跳过"], color="38;5;203", title_color="38;5;203")
+    elif event.type == "memory_reflection_skipped":
+        _print_event_block("memory · reflection skipped", [event.reflection_skip_reason or "policy"])
+    elif event.type == "memory_archive_started":
+        _print_event_block("memory · archive", ["长期记忆容量不足，正在选择可归档候选"], color="38;5;221", title_color="38;5;221")
+    elif event.type == "memory_archive_completed":
         action = event.archive_action or "unknown"
-        suffix = (
-            f" · {event.archive_memory_id}"
-            if event.archive_memory_id is not None
-            else ""
-        )
-        print(f"{prefix} 长期记忆容量维护完成：{action}{suffix}")
-    elif event.type == 'memory_archive_failed':
-        print(f"{prefix} 长期记忆容量维护失败，未执行归档")
-    elif event.type == 'agent_completed':
-        print(f"{prefix} Agent 执行完成")
-    elif event.type == 'agent_failed':
-        reason = event.stop_reason.value if event.stop_reason else "unknown"
-        print(f"{prefix} Agent 执行停止：{reason}")
+        suffix = f" · {event.archive_memory_id}" if event.archive_memory_id else ""
+        _print_event_block("memory · archive completed", [f"动作：{action}{suffix}"], color="38;5;221", title_color="38;5;221")
+    elif event.type == "memory_archive_failed":
+        _print_event_block("memory · archive failed", ["容量维护失败，未执行归档"], color="38;5;203", title_color="38;5;203")
     elif event.type == "memory_archive_skipped":
-        print(f"{prefix} 长期记忆归档已跳过：{event.archive_skip_reason or 'policy'}")
+        _print_event_block("memory · archive skipped", [event.archive_skip_reason or "policy"])
     elif event.type == "skill_activated":
-        print(f"{prefix} 技能已激活：{event.skill_name}")
+        _print_event_block("skill · activated", [event.skill_name or "unknown"], color="38;5;117", title_color="38;5;117")
     elif event.type == "skill_activation_failed":
-        print(f"{prefix} 技能激活失败：{event.skill_name} · {event.skill_error or '未知原因'}")
+        _print_event_block("skill · activation failed", [f"{event.skill_name or 'unknown'} · {event.skill_error or '未知原因'}"], color="38;5;203", title_color="38;5;203")
+    elif event.type == "context_handoff":
+        _print_event_block("context · handoff", ["正在切换上下文并保留运行状态"], color="38;5;183", title_color="38;5;183")
+    elif event.type == "context_compacted":
+        _print_event_block("context · compacted", [f"压缩阶段：{event.compaction_stage or 'unknown'}"], color="38;5;183", title_color="38;5;183")
+    elif event.type == "agent_completed":
+        _print_event_block("assistant · completed", ["当前 Run 执行完成"], color="38;5;114", title_color="38;5;114")
+    elif event.type == "agent_failed":
+        reason = event.stop_reason.value if event.stop_reason else "unknown"
+        _print_event_block("assistant · failed", [f"执行停止：{reason}"], color="38;5;203", title_color="38;5;203")
     elif event.type == "agent_cancelled":
-        print(f"{prefix} Agent 已取消")
+        _print_event_block("assistant · cancelled", ["当前 Run 已取消"], color="38;5;214", title_color="38;5;214")
+
+
+def print_assistant_message(content: str) -> None:
+    """Render the final assistant response with the same vertical guide."""
+    _print_event_block(
+        "assistant · final answer",
+        content.splitlines() or [""],
+        color="38;5;114",
+        title_color="38;5;114",
+    )
 
 def print_checkpoints(checkpoints: tuple[RunCheckpoint, ...]) -> None:
     """显示当前会话最近的恢复边界。"""
@@ -513,4 +605,4 @@ def print_help() -> None:
     )
 
 
-__all__ = ['print_banner', 'print_startup_status', 'print_conversation_divider', 'run_setup', 'print_agent_event', 'print_recovered_runs', 'print_memories', 'print_memory', 'print_permission_rules', 'print_checkpoints', 'print_trace', 'print_help']
+__all__ = ['print_banner', 'format_power_bar', 'print_startup_status', 'print_conversation_divider', 'run_setup', 'print_agent_event', 'print_assistant_message', 'print_recovered_runs', 'print_memories', 'print_memory', 'print_permission_rules', 'print_checkpoints', 'print_trace', 'print_help']

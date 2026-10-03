@@ -224,8 +224,7 @@ class MemoryCreateTool(BaseTool):
             name="memory_create",
             record_output=False,
             description=(
-                "创建一条长期记忆。只有对未来跨会话仍有明显价值的信息才创建；"
-                "当前任务状态属于 Task、可复用流程属于 Skills，都不应写入。"
+                "创建一条长期记忆。对未来跨会话仍有价值的信息才创建；"
                 f"写入条件：{MEMORY_WRITE_POLICY}"
             ),
             parameters={

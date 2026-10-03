@@ -71,6 +71,7 @@ class ContextSettings(BaseSettings):
     context_keep_recent_conversation_blocks: int = Field(default=4, ge=0) # 生成历史摘要时保留最近四个对话块，优先总结更早的历史
     context_max_unsummarized_conversation_blocks: int = Field(default=30, gt=0) # 未摘要对话块过多时触发历史压缩，避免只依赖 token 阈值
     context_summary_max_output_tokens: int = Field(default=1_024, gt=0) # 生成摘要时，摘要模型允许输出的最大 token 数
+    context_task_boundary_stable_count: int = Field(default=2, ge=1)
 
     # 覆盖某个模型的容量配置
     context_override_provider: str | None = None

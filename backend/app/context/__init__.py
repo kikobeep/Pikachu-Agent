@@ -27,6 +27,7 @@ from .config import (
     ContextSummaryModelConfig,
 )
 from .manager import (
+    ContextCompactionTrigger,
     ContextCompactionStage,
     ContextDecision,
     ContextManager,
@@ -53,6 +54,7 @@ __all__ = [
     'ContextBudget',
     'ContextBudgetPolicy',
     'ContextCompactionStage',
+    'ContextCompactionTrigger',
     'ContextDecision',
     'ContextManager',
     'ContextSettings',

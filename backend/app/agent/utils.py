@@ -213,8 +213,8 @@ def tool_call_signature(tool_call: ToolCall) -> str:
     return f"{tool_call.name}:{canonical_arguments}"
 
 
-def plan_task_id_from_output(output: object) -> str | None:
-    """从 task_create / task_update 的工具输出 JSON 中提取任务 ID。"""
+def plan_id_from_output(output: object) -> str | None:
+    """从 plan_create / plan_update 的工具输出 JSON 中提取计划 ID。"""
 
     if isinstance(output, str):
         try:
@@ -227,8 +227,8 @@ def plan_task_id_from_output(output: object) -> str | None:
         return None
     if not isinstance(payload, dict):
         return None
-    task_id = payload.get("id")
-    return task_id if isinstance(task_id, str) and task_id else None
+    plan_id = payload.get("plan_id") or payload.get("id")
+    return plan_id if isinstance(plan_id, str) and plan_id else None
 
 
 def provider_name(provider: ModelProvider | str | None) -> str | None:
@@ -263,4 +263,3 @@ class RequestPrefixState:
         if source_messages[:previous_count] != self.source_messages:
             return None
         return (*self.sent_messages, *source_messages[previous_count:])
-

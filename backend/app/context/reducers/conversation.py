@@ -83,6 +83,7 @@ class ConversationReducer:
         model: str | None = None,
         provider: str | None = None,
         handoff: bool = False,
+        force: bool = False,
     ) -> ConversationReductionResult:
         """摘要可覆盖的最旧前缀；失败时原样返回 prepared_messages。
 
@@ -153,6 +154,12 @@ class ConversationReducer:
             new_state = ConversationSummaryState(
                 summary=generated.summary,
                 covered_message_count=cutoff,
+                active_task_hash=(previous_state.active_task_hash if previous_state else None),
+                candidate_task_hash=(previous_state.candidate_task_hash if previous_state else None),
+                candidate_task_basis_message_id=(
+                    previous_state.candidate_task_basis_message_id if previous_state else None
+                ),
+                task_hash_stable_count=(previous_state.task_hash_stable_count if previous_state else 0),
             )
             reduced_messages = _replace_covered_prefix(
                 prepared,
@@ -162,7 +169,7 @@ class ConversationReducer:
             estimated = self._estimator.estimate_request(
                 reduced_messages, tools=tools, model=model, provider=provider,
             )
-            if estimated < initial_estimated_input_tokens:
+            if estimated < initial_estimated_input_tokens or force:
                 return ConversationReductionResult(
                     messages=reduced_messages,
                     estimated_input_tokens=estimated,

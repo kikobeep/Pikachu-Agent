@@ -70,6 +70,7 @@ class ToolReducer:
         model: str | None = None,
         provider: str | None = None,
         keep_recent_tool_rounds: int | None = None,
+        force: bool = False,
     ) -> ToolReductionResult:
       
         if min(original_estimated, tool_result_tokens, tool_result_budget_tokens) < 0:
@@ -94,7 +95,7 @@ class ToolReducer:
         removed_rounds = 0
 
         for block_index in candidates:
-            if after <= tool_result_budget_tokens:
+            if not force and after <= tool_result_budget_tokens:
                 break
             block = working[block_index]
             block_messages = list(block.messages)
@@ -109,7 +110,7 @@ class ToolReducer:
                 after = self._estimate_tool_results(
                     working, model=model, provider=provider,
                 )
-                if after <= tool_result_budget_tokens:
+                if not force and after <= tool_result_budget_tokens:
                     break
         # 第二阶段缩减：如果截短工具结果后仍超预算，就从较早的候选轮次开始，整轮移除
         for block_index in candidates:
@@ -385,4 +386,3 @@ def _flatten(
 
 
 __all__ = ["ToolReducer", "ToolReductionResult"]
-

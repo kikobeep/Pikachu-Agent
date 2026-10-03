@@ -186,35 +186,14 @@ class RunManager:
             if not task.done()
         )
 
-    # ------------------------------------------------------------------
-    # cancel
-    # ------------------------------------------------------------------
 
     async def cancel(self, run_id: str) -> Run:
+        """暂停当前 Run，并保留 checkpoint 供后续恢复。
 
-        run = await self._run_store.require(run_id)
-        if run.status in TERMINAL_STATUSES:
-            return run
-        if run.status is not RunStatus.RUNNING:
-            raise ValueError(
-                f"cannot cancel run in state {run.status.value}"
-            )
-        task = self._active_tasks.get(run_id)
-        if task is None or task.done():
-            updated = await self._run_store.mark_cancelled(
-                run_id,
-                error="cancelled without active execution",
-            )
-            await self._cancel_pending_approvals(run_id)
-            return updated
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        updated = await self._run_store.require(run_id)
-        await self._cancel_pending_approvals(run_id)
-        return updated
+        CLI 中的 Ctrl-C 表示用户暂时中断工作，不代表放弃本次 Run，
+        因此这里使用 INTERRUPTED，而不是 CANCELLED。
+        """
+        return await self.interrupt(run_id)
 
     async def interrupt(self, run_id: str) -> Run:
 
@@ -274,6 +253,8 @@ class RunManager:
             event_handler=event_handler,
             recovery_run_id=run_id,
             recovered_from_run_id=run_id,
+            source=run.source,
+            source_id=run.source_id,
             # 恢复后的新 Run 沿用旧 Run 的执行模式。
             mode=run.mode,
         )
@@ -302,6 +283,7 @@ class RunManager:
                     run_id=run_id,
                     recovery_run_id=recovery_run_id,
                     mode=mode,
+                    source=(await self._run_store.require(run_id)).source,
                 )
             except asyncio.CancelledError:
                 current = await self._run_store.get(run_id)

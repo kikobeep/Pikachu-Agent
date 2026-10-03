@@ -18,7 +18,7 @@ _TERMINAL_STATUSES = frozenset(
 )
 
 
-class TaskStore:
+class PlanStore:
     def __init__(self, tasks_dir: str | Path = DEFAULT_TASKS_DIR) -> None:
         self.tasks_dir = Path(tasks_dir).expanduser().resolve()
         self._locks: dict[str, asyncio.Lock] = {}
@@ -47,7 +47,7 @@ class TaskStore:
         return await asyncio.to_thread(_read)
 
 
-    async def task_for_conversation(
+    async def plan_for_conversation(
         self,
         conversation_id: str,
     ) -> Task | None:
@@ -211,12 +211,11 @@ class TaskStore:
             raise ValueError(f"任务 ID 前缀不唯一：{task_id}")
         return matches[0]
 
-    async def active_for_conversation(
+    async def active_plan_for_conversation(
         self,
         conversation_id: str,
     ) -> Task | None:
-        return await self.task_for_conversation(conversation_id)
-
+        return await self.plan_for_conversation(conversation_id)
 
 def _update_step(
     steps: tuple[TaskStep, ...],

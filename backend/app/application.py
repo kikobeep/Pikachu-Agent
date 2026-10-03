@@ -51,8 +51,8 @@ from app.skills_improve.miner import ModelPatternMiner
 from app.skills_improve.service import SkillImproveService
 from app.task.attibution import TaskToolOutputAttributionResolver
 from app.task.context import TaskContextProvider
-from app.task.store import TaskStore
-from app.task.tools import register_task_tools
+from app.task.store import PlanStore
+from app.task.tools import register_plan_tools
 from app.tools.builtin import builtin_tool_registry
 from app.tools.builtin._workspace import workspace_root_path
 from app.tools.approval import ApprovalGate
@@ -128,6 +128,10 @@ class Application:
         ace_select_top_k: int = 1,
         ace_irrelevant_streak_limit: int = 5,
         ace_max_output_tokens: int = 1800,
+        ace_bulletpoint_analyzer_enabled: bool = True,
+        ace_bulletpoint_analyzer_threshold: float = 0.90,
+        ace_max_bullets: int = 16,
+        ace_harmful_prune_threshold: int = 3,
     ) -> None:
         self.database = Path(database).expanduser().resolve()
         self.tasks_dir = Path(tasks_dir).expanduser().resolve()
@@ -148,12 +152,16 @@ class Application:
         self.ace_playbook_path = (
             Path(ace_playbook_path).expanduser().resolve()
             if ace_playbook_path is not None
-            else self.ace_data_dir / "playbook.json"
+            else self.ace_data_dir / "playbook.txt"
         )
         self.ace_max_strategies = ace_max_strategies
         self.ace_select_top_k = ace_select_top_k
         self.ace_irrelevant_streak_limit = ace_irrelevant_streak_limit
         self.ace_max_output_tokens = ace_max_output_tokens
+        self.ace_bulletpoint_analyzer_enabled = ace_bulletpoint_analyzer_enabled
+        self.ace_bulletpoint_analyzer_threshold = ace_bulletpoint_analyzer_threshold
+        self.ace_max_bullets = ace_max_bullets
+        self.ace_harmful_prune_threshold = ace_harmful_prune_threshold
         # self.mcp_config = Path(mcp_config).expanduser().resolve()
         # self.mcp_config_store = MCPConfigurationStore(self.mcp_config)
         self.memory_dir = (
@@ -242,7 +250,7 @@ class Application:
         # self.computer_lease: ComputerLeaseManager | None = None
         # self.computer_session: ComputerSessionManager | None = None
         self.tool_registry: ToolRegistry | None = None
-        self.task_store: TaskStore | None = None
+        self.plan_store: PlanStore | None = None
         self.memory_manager: MemoryManager | None = None
         self.memory_embedding_adapter: EmbeddingAdapter | None = None
         self.skill_store: SkillStore | None = None
@@ -254,6 +262,7 @@ class Application:
         self.memory_reflection_enabled = True
         self.memory_archive_enabled = True
         self.context_summarizer: ModelContextSummarizer | None = None
+        self.context_manager: ContextManager | None = None
         self.ace: AceCoordinator | None = None
         # self.mcp_manager: MCPClientManager | None = None
         self.mcp_statuses: tuple[Any, ...] = ()
@@ -286,11 +295,11 @@ class Application:
         register_history_tools(tool_registry, conversation_store)
 
         '''
-        task_store: 任务目标、约束、步骤、进度、关键事实等。通过task_create、task_update、task_get 等工具创建、修改或读取任务
+        task_store: 计划目标、约束、步骤、进度、关键事实等。通过plan_create、plan_update、plan_get 等工具创建、修改或读取计划
         '''
-        task_store = TaskStore(self.tasks_dir)
-        await task_store.initialize()
-        register_task_tools(tool_registry, task_store)
+        plan_store = PlanStore(self.tasks_dir)
+        await plan_store.initialize()
+        register_plan_tools(tool_registry, plan_store)
 
         '''
         evidence_store: 保存工具原始输出的存储对象，方便后续重新查阅，包括原始输出正文、来自哪个工具、哪次工具调用
@@ -300,7 +309,7 @@ class Application:
         register_evidence_tools(tool_registry, evidence_store)
         evidence_recorder = EvidenceRecorder(
             evidence_store,
-            attribution_resolver=TaskToolOutputAttributionResolver(task_store),
+            attribution_resolver=TaskToolOutputAttributionResolver(plan_store),
         )
         '''
         summary_store：滚动摘要，以及摘要覆盖了多少条原始消息
@@ -435,6 +444,10 @@ class Application:
                 select_top_k=self.ace_select_top_k,
                 irrelevant_streak_limit=self.ace_irrelevant_streak_limit,
                 max_output_tokens=self.ace_max_output_tokens,
+                bulletpoint_analyzer_enabled=self.ace_bulletpoint_analyzer_enabled,
+                bulletpoint_analyzer_threshold=self.ace_bulletpoint_analyzer_threshold,
+                max_bullets=self.ace_max_bullets,
+                harmful_prune_threshold=self.ace_harmful_prune_threshold,
             )
 
         # MCP：配置缺失 / 损坏时不阻断启动（CLI 会检查 mcp_error 决定退出码）。
@@ -456,6 +469,23 @@ class Application:
         #     MCPStatusTool(mcp_manager, configuration_error=mcp_error)
         # )
 
+        context_manager = ContextManager(
+            context_settings=context_settings,
+            conversation_reducer=(
+                ConversationReducer(
+                    context_summarizer,
+                    keep_recent_conversation_blocks=(
+                        context_settings.context_keep_recent_conversation_blocks
+                    ),
+                    keep_recent_tool_rounds=(
+                        context_settings.context_keep_recent_tool_rounds
+                    ),
+                )
+                if context_summarizer is not None
+                else None
+            ),
+        )
+
         runtime = AgentRuntime(
             handoff_store=handoff_store,
             workspace_root=self.workspace_root,
@@ -470,23 +500,8 @@ class Application:
             max_tool_rounds=self.max_tool_rounds,
             max_output_tokens=self.max_output_tokens,
             
-            context_manager=ContextManager(
-                context_settings=context_settings,
-                conversation_reducer=(
-                    ConversationReducer(
-                        context_summarizer,
-                        keep_recent_conversation_blocks=(
-                            context_settings.context_keep_recent_conversation_blocks
-                        ),
-                        keep_recent_tool_rounds=(
-                            context_settings.context_keep_recent_tool_rounds
-                        ),
-                    )
-                    if context_summarizer is not None
-                    else None
-                ),
-            ),
-            task_context_provider=TaskContextProvider(task_store),
+            context_manager=context_manager,
+            task_context_provider=TaskContextProvider(plan_store),
             checkpoint_store=checkpoint_store,
             memory_manager=memory_manager,
             memory_auto_search_enabled=self.memory_auto_search_enabled,
@@ -552,7 +567,8 @@ class Application:
         # self.artifact_store = artifact_store
         # self.artifact_service = artifact_service
         self.tool_registry = tool_registry
-        self.task_store = task_store
+        self.plan_store = plan_store
+        self.task_store = plan_store  # compatibility alias
         self.memory_manager = memory_manager
         self.skill_store = skill_store
         self.skill_context_provider = skill_context_provider
@@ -564,6 +580,7 @@ class Application:
         self.memory_reflection_enabled = reflection_config.enabled
         self.memory_archive_enabled = archive_config.enabled
         self.context_summarizer = context_summarizer
+        self.context_manager = context_manager
         self.active_model_roles = {
             "main": {
                 "enabled": True,

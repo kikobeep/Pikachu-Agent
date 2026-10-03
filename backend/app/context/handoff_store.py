@@ -1,6 +1,6 @@
 """Handoff 快照的文件式持久化。
 
-照搬 TaskStore 的原子写入模式：tmp 文件 → fsync → os.replace。
+沿用 PlanStore 的原子写入模式：tmp 文件 → fsync → os.replace。
 """
 
 from __future__ import annotations

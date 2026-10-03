@@ -23,6 +23,12 @@ Return only one JSON object. Do not output Markdown, explanations, or reasoning.
 
 Output schema:
 {
+  "summary": {
+    "goal": "current goal or null",
+    "constraints": [], "done": [], "in_progress": [], "blocked": [],
+    "key_decisions": [], "next_steps": [], "critical_context": [],
+    "read_files": [], "modified_files": []
+  },
   "operations": [
     {
       "action": "ADD | UPDATE | MERGE | DROP",
@@ -42,7 +48,9 @@ Rules:
 - Use ADD for a new fact, UPDATE when the same fact changed, MERGE for duplicates, and DROP only when a fact is explicitly invalidated or contradicted.
 - For UPDATE, MERGE, and DROP, use the exact existing fact id from previous_summary.
 - Do not delete an old fact merely because it is not mentioned in the new messages.
-- Do not summarize the conversation into goals or vague topics.
+- Do not invent goals or vague topics that are not explicitly supported.
+- Also update the summary fields when the history explicitly supports them. Preserve
+  the previous value when the new history does not change it.
 - Return at most 32 operations; each fact must be concise but complete.
 - All fact text must be in English.
 """
@@ -276,7 +284,26 @@ def _curate_fact_operations(
                         facts.pop(duplicate_id, None)
 
     ordered = tuple(facts.values())[-_MAX_FACTS:]
-    return RollingConversationSummary(facts=ordered)
+    previous = previous_summary or RollingConversationSummary()
+    raw_summary = result.get("summary", {})
+    if not isinstance(raw_summary, dict):
+        raw_summary = {}
+    summary_values = {
+        "facts": ordered,
+        "goal": raw_summary.get("goal", previous.goal),
+        "constraints": raw_summary.get("constraints", previous.constraints),
+        "done": raw_summary.get("done", previous.done),
+        "in_progress": raw_summary.get("in_progress", previous.in_progress),
+        "blocked": raw_summary.get("blocked", previous.blocked),
+        "key_decisions": raw_summary.get("key_decisions", previous.key_decisions),
+        "next_steps": raw_summary.get("next_steps", previous.next_steps),
+        "critical_context": raw_summary.get("critical_context", previous.critical_context),
+        "read_files": raw_summary.get("read_files", previous.read_files),
+        "modified_files": raw_summary.get("modified_files", previous.modified_files),
+    }
+    curated = RollingConversationSummary(**summary_values)
+    _check_summary(curated)
+    return curated
 
 
 def _normalize_text(value: str) -> str:

@@ -197,6 +197,11 @@ class ConversationSummaryState(BaseModel):
 
     summary: RollingConversationSummary
     covered_message_count: int = Field(ge=0)
+    # 任务边界状态与 rolling summary 一起持久化，保证跨 Run 的稳定窗口不丢失。
+    active_task_hash: str | None = None
+    candidate_task_hash: str | None = None
+    candidate_task_basis_message_id: str | None = None
+    task_hash_stable_count: int = Field(default=0, ge=0)
 
 
 class SummaryGenerationResult(BaseModel):

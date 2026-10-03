@@ -27,6 +27,13 @@ from app.context.handoff import HandoffSnapshot, collect_git_snapshot
 from app.context.handoff_store import HandoffStore
 from app.context.manager import ContextManager
 from app.context.summary import ConversationSummaryState
+from app.context.task_boundary import (
+    TaskBoundaryTrigger,
+    basis_message_id,
+    classify as classify_task_boundary,
+    ensure_initial_task,
+    observe as observe_task_boundary,
+)
 from app.memory.manager import MemoryManager
 from app.memory.search import recent_user_message_texts
 from app.memory.search_config import MemorySearchInputs
@@ -60,8 +67,8 @@ _PLAN_MODE_SYSTEM_MESSAGE = (
     "你现在处于 PLAN MODE（规划模式）：只分析、调查并形成计划，不要修改用户环境。\n"
     "你可以使用只读 / 搜索工具（read_file、list_files、web_search、get_current_time、"
     "memory_read、memory_search、history_search/read、evidence_search/read）与任务工具"
-    "（task_create、task_update、task_get、task_list）。\n"
-    "完成必要调查后，必须创建（task_create）或更新（task_update）一个 PENDING 任务"
+    "（plan_create、plan_update、plan_get、plan_list）。\n"
+    "完成必要调查后，必须创建（plan_create）或更新（plan_update）一个 PENDING 计划"
     "作为本轮计划，至少包含 title、goal 与具体可执行的 steps；不要伪造 DONE 步骤、"
     "已完成 state 或已验证 key_facts。\n"
     "最后返回简洁的计划说明。"
@@ -291,6 +298,55 @@ class AgentLoop:
         effective_max_steps = self._max_steps
         handoff_used = False
         step = 0
+
+        # 每个新的用户 Run 在可见主请求前观察一次任务边界。首条消息只初始化
+        # active hash；后续消息使用隐藏分类请求，并通过稳定窗口确认切换。
+        task_trigger = TaskBoundaryTrigger.AUTO
+        try:
+            first_user_content = next(
+                (message.content for message in history if message.role is MessageRole.USER),
+                user_input,
+            )
+            first_basis = basis_message_id(
+                conversation_id=conversation_id,
+                history=(),
+                user_input=first_user_content,
+            )
+            current_summary_state = ensure_initial_task(
+                current_summary_state,
+                conversation_id=conversation_id,
+                basis=first_basis,
+            )
+            if history:
+                boundary_adapter = self._model_registry.get(self._provider)
+                boundary_model = self._model or boundary_adapter.default_model
+                boundary_basis = basis_message_id(
+                    conversation_id=conversation_id,
+                    history=history,
+                    user_input=user_input,
+                )
+                boundary_decision, boundary_usage = await classify_task_boundary(
+                    boundary_adapter,
+                    model=boundary_model,
+                    history=history,
+                    user_input=user_input,
+                    summary_state=current_summary_state,
+                )
+                current_summary_state, observation = observe_task_boundary(
+                    current_summary_state,
+                    decision=boundary_decision,
+                    conversation_id=conversation_id,
+                    basis=boundary_basis,
+                    required_stable_count=self._context_manager.task_boundary_required_stable_count,
+                )
+                if observation.confirmed_change:
+                    task_trigger = TaskBoundaryTrigger.TASK
+                usage = add_usage(usage, boundary_usage)
+                main_model_calls += usage_call_count(boundary_usage)
+                budget_chargeable_tokens += chargeable_tokens(boundary_usage)
+        except Exception:
+            # 边界判断不能阻断主任务；失败时保持当前任务并走 AUTO。
+            task_trigger = TaskBoundaryTrigger.AUTO
 
         while True:
             step += 1
@@ -547,7 +603,9 @@ class AgentLoop:
                     max_output_tokens=effective_max_output_tokens,
                     history_count=context_history_count,
                     summary_state=context_summary_state,
+                    trigger=task_trigger,
                 )
+                task_trigger = TaskBoundaryTrigger.AUTO
                 # 正在复用上下文，但它已经太长，而且需要首次生成历史摘要
                 if continuation_messages is not None and (context_decision.exceeds_input_budget or (current_summary_state is None and context_decision.requires_compaction and context_decision.needs_next_compaction_stage)): 
                     continuation_messages = None
@@ -561,6 +619,7 @@ class AgentLoop:
                         max_output_tokens=effective_max_output_tokens,
                         history_count=history_message_length,
                         summary_state=request_summary_state,
+                        trigger=TaskBoundaryTrigger.AUTO,
                     )
             except Exception as exc:
                 return await stop_with_error(
@@ -1004,7 +1063,7 @@ class AgentLoop:
         usage: ModelUsage,
         error: AgentRuntimeError | None = None,
         summary_state: ConversationSummaryState | None = None,
-        plan_task_id: str | None = None,
+        plan_id: str | None = None,
     ) -> AgentResult:
         complete_messages = tuple(messages)
         if not complete_messages or complete_messages[-1] != final_message:
@@ -1025,7 +1084,7 @@ class AgentLoop:
                 else None
             ),
             summary_state=summary_state,
-            plan_task_id=plan_task_id,
+            plan_id=plan_id,
         )
 
 '''

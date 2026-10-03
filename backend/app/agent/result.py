@@ -72,8 +72,8 @@ class AgentResult(BaseModel):
     usage: ModelUsage = Field(default_factory=ModelUsage)
     error: AgentError | None = None
     summary_state: ConversationSummaryState | None = None
-    # Plan Mode：本轮创建 / 更新的 PENDING Task ID（normal 模式恒为 None）。
-    plan_task_id: str | None = None
+    # Plan Mode：本轮创建 / 更新的 PENDING Plan ID（normal 模式恒为 None）。
+    plan_id: str | None = None
 
     @property
     def ok(self) -> bool:

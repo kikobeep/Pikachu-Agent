@@ -163,12 +163,14 @@ class ConversationService:
         )
         try:
             run = await self._run_manager.wait(run_id)
-        except KeyboardInterrupt:
-            try:
-                await self._run_manager.cancel(run_id)
-            except (ValueError, KeyError):
-                pass
-            raise
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            # Ctrl-C 可能表现为 KeyboardInterrupt，也可能表现为 asyncio
+            # 取消当前 CLI 主任务；两种情况都必须保留可恢复的 Run。
+            current_task = asyncio.current_task()
+            if current_task is not None:
+                current_task.uncancel()
+            await self._run_manager.cancel(run_id)
+            run = await self._run_manager.wait(run_id)
         result = self._run_manager.result(run_id)
 
         if result is None:

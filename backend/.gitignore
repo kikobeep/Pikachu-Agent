@@ -6,5 +6,6 @@ __pycache__/
 .memory/
 .skills/
 .ruff_cache/
-/eval/
+pikachu.egg-info/
+conversation.db
 

@@ -19,10 +19,10 @@ PLAN_MODE_ALLOWED_TOOLS = frozenset(
         "history_read",
         "evidence_search",
         "evidence_read",
-        "task_create",
-        "task_update",
-        "task_get",
-        "task_list",
+        "plan_create",
+        "plan_update",
+        "plan_get",
+        "plan_list",
     }
 )
 

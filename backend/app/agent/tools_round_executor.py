@@ -8,7 +8,7 @@ from app.agent.context_injection import ContextRuntime
 from app.agent.error import RepeatedToolCallError
 from app.agent.result import ToolCallRecord
 from app.agent.tool_hooks import AgentEventHook
-from app.agent.utils import plan_task_id_from_output,tool_call_signature
+from app.agent.utils import plan_id_from_output,tool_call_signature
 from app.checkpoint.store import CheckpointStore
 from app.skills.tools import SKILL_READ_TOOL_NAME
 from app.tools.config import ToolResult
@@ -27,8 +27,8 @@ class ToolRoundOutcome:
     pending_activations: frozenset[str]
     previous_signature: str | None
     repeated_count: int
-    plan_task_created: bool
-    plan_task_id: str | None
+    plan_created: bool
+    plan_id: str | None
     repeated_error: RepeatedToolCallError | None = None
 
 class ToolRoundExecutor:
@@ -68,8 +68,8 @@ class ToolRoundExecutor:
         records: list[ToolCallRecord] = []
         result_messages: list[Message] = []
         pending_activations: set[str] = set()
-        plan_task_created = False
-        plan_task_id: str | None = None
+        plan_created = False
+        plan_id: str | None = None
 
         if self._checkpoint_store is not None:
             await self._checkpoint_store.before_tools(
@@ -92,8 +92,8 @@ class ToolRoundExecutor:
                     pending_activations=frozenset(pending_activations),
                     previous_signature=previous_signature,
                     repeated_count=repeated_count,
-                    plan_task_created=plan_task_created,
-                    plan_task_id=plan_task_id,
+                    plan_created=plan_created,
+                    plan_id=plan_id,
                     repeated_error=RepeatedToolCallError(tool_call.name),
                 )
 
@@ -121,7 +121,7 @@ class ToolRoundExecutor:
             if self._checkpoint_store is not None:
                 await self._checkpoint_store.complete_tool(run_id, result)
             '''
-            task_create / task_update
+            plan_create / plan_update
                 ↓
             任务存入 Task Store
                 ↓
@@ -132,12 +132,12 @@ class ToolRoundExecutor:
             if (
                 mode is AgentMode.PLAN
                 and result.success
-                and tool_call.name in ("task_create", "task_update")
+                and tool_call.name in ("plan_create", "plan_update")
             ):
-                plan_task_created = True
-                task_id = plan_task_id_from_output(result.output)
-                if task_id:
-                    plan_task_id = task_id
+                plan_created = True
+                extracted_plan_id = plan_id_from_output(result.output)
+                if extracted_plan_id:
+                    plan_id = extracted_plan_id
 
             records.append(
                 ToolCallRecord(
@@ -166,8 +166,8 @@ class ToolRoundExecutor:
             pending_activations=frozenset(pending_activations),
             previous_signature=previous_signature,
             repeated_count=repeated_count,
-            plan_task_created=plan_task_created,
-            plan_task_id=plan_task_id,
+            plan_created=plan_created,
+            plan_id=plan_id,
         )
 
 

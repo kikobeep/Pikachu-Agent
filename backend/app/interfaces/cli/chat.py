@@ -11,13 +11,17 @@ from app.agent.spec import load_agent_prompt
 from app.conversation import Conversation,TriggerContext,ConversationSource
 from app.conversation.service import ConversationService
 from app.conversation.store import DEFAULT_DATABASE_PATH, ConversationStore
+from app.context.tokens import default_token_estimator
 from app.model import ModelProvider
+from app.model.config import AgentMode
 from app.tools.builtin.web_search import WebSearchTool
 from app.tools.approval import ConsoleApprovalGate
 from app.application import Application
 
 from .cli_ui import (
     print_agent_event as _print_agent_event,
+    print_assistant_message as _print_assistant_message,
+    format_power_bar,
     print_banner,
     print_conversation_divider,
     print_help,
@@ -48,8 +52,14 @@ def _initial_message(system_prompt: str | None) -> list[Message]:
 
 
 async def _run(args,*,offer_setup: bool = True,):
-    print_banner()
-    effective_system_prompt = args.system or load_agent_prompt(explicit_path=args.agent_md)
+    # CLI 默认把执行 pikachu 时所在的目录作为当前 workspace。
+    # Prompt 加载和 Application 必须使用同一个 workspace，避免 agent.md
+    # 与文件工具、沙箱看到的工作区不一致。
+    workspace_root = Path.cwd().resolve()
+    effective_system_prompt = args.system or load_agent_prompt(
+        explicit_path=args.agent_md,
+        workspace_root=workspace_root,
+    )
     try:
         app = Application(
             provider=args.provider,
@@ -63,6 +73,7 @@ async def _run(args,*,offer_setup: bool = True,):
             max_output_tokens=args.max_output_tokens,
             ace_enabled=args.ace,
             approval_gate=ConsoleApprovalGate(),
+            workspace_root=workspace_root,
         )
     except ValueError as exc:
         missing_provider = "No model provider is configured" in str(exc)
@@ -115,6 +126,25 @@ async def _run(args,*,offer_setup: bool = True,):
         reflection_status = "启用" if app.memory_reflection_enabled else "关闭"
         reflection_model = app.memory_reflector.model_hint or "未解析"
         reflection_provider = app.memory_reflector.provider_hint or "未解析"
+
+        context_window = app.context_manager.context_window_for(provider, model)
+        visible_tools = tuple(
+            tool_registry.definitions_for_mode(AgentMode.DEFAULT)
+        )
+        context_used = default_token_estimator().estimate_request(
+            history,
+            tools=visible_tools,
+            model=model,
+            provider=provider,
+        )
+        print_banner(
+            status=(
+                ("Model", f"{provider}/{model}"),
+                ("Power", format_power_bar(context_used, context_window)),
+                ("Context", f"{context_used:,} / {context_window:,}"),
+                ("Mode", "exploring"),
+            )
+        )
 
         print_startup_status(
             (
@@ -328,8 +358,7 @@ async def _send_message(
         )
         print(f"[工具调用：{tools}]")
     if result.final_message.content:
-        print()
-        print(result.final_message.content)
+        _print_assistant_message(result.final_message.content)
     if dispatch.run.status.value == "cancelled":
         print("[Run 已被取消]")
     return result.ok, conversation
@@ -365,7 +394,7 @@ async def _load_or_create_conversation(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m app",
+        prog="pikachu",
         description="启动 CLI，或完成首次模型设置。",
     )
     parser.add_argument(

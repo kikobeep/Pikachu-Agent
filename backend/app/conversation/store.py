@@ -15,7 +15,9 @@ from app.conversation.base import Conversation
 from app.conversation.models import ConversationMessageRecord
 
 DEFAULT_DATABASE_PATH = (
-    Path(__file__).resolve().parents[2] / "conversation.db"
+    Path(__file__).resolve().parents[2]
+    / ".database"
+    / "conversation.db"
 )
 
 _CONVERSATION_SELECT = """

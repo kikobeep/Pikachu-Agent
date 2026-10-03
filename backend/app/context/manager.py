@@ -46,6 +46,10 @@ from app.context.summary import ConversationSummaryState
 from app.context.tokens import TokenEstimator, default_token_estimator
 from app.model.config import ModelUsage
 from app.tools.config import ToolDefinition
+from .task_boundary import TaskBoundaryTrigger
+
+# Public name for callers that select the context-compaction policy explicitly.
+ContextCompactionTrigger = TaskBoundaryTrigger
 
 
 class ContextCompactionStage(StrEnum):
@@ -147,6 +151,11 @@ class ContextManager:
         self._max_unsummarized_conversation_blocks = (
             settings.context_max_unsummarized_conversation_blocks
         )
+        self.task_boundary_required_stable_count = settings.context_task_boundary_stable_count
+
+    def context_window_for(self, provider: str, model: str) -> int:
+        """Return the configured context window for a provider/model pair."""
+        return self._registry.lookup(provider, model).context_window
     
     async def prepare(
         self,
@@ -160,7 +169,9 @@ class ContextManager:
         keep_recent_tool_rounds: int | None = None,
         summary_state: ConversationSummaryState | None = None,
         handoff: bool = False,
+        trigger: TaskBoundaryTrigger = TaskBoundaryTrigger.AUTO,
     ) -> ContextDecision:
+        trigger = TaskBoundaryTrigger(trigger)
 
         if history_count is None:
             history_count = 0
@@ -223,8 +234,9 @@ class ContextManager:
         tool_results_requires_reduction = (
             tool_result_tokens_before > budget.tool_result_budget_tokens
         )
+        task_triggered = trigger is TaskBoundaryTrigger.TASK
 
-        if tool_results_requires_reduction:
+        if tool_results_requires_reduction or task_triggered:
             tool_results_reduction = self._tool_reducer.project(
                 original_messages,
                 original_estimated=prepared_input_tokens,
@@ -234,6 +246,7 @@ class ContextManager:
                 model=model,
                 provider=provider,
                 keep_recent_tool_rounds=keep_recent_tool_rounds,
+                force=task_triggered,
             )
             request_messages = tool_results_reduction.messages
             prepared_input_tokens = tool_results_reduction.estimated_input_tokens
@@ -256,7 +269,8 @@ class ContextManager:
             > self._max_unsummarized_conversation_blocks
         )
         conversation_requires_compaction = (
-            prepared_input_tokens >= budget.trigger_tokens
+            task_triggered
+            or prepared_input_tokens >= budget.trigger_tokens
             or conversation_block_triggered
         )
 
@@ -289,7 +303,10 @@ class ContextManager:
                 prepared_messages=request_messages,
                 current_messages=current_messages,
                 previous_state=valid_summary_state,
-                handoff=handoff,
+                # TASK 是一次旧任务切换压缩：复用当前 summary 字段和 reducer，
+                # 但不保留旧的近期对话块；最新用户消息仍在 current_messages 中。
+                handoff=handoff or task_triggered,
+                force=task_triggered,
                 initial_estimated_input_tokens=prepared_input_tokens,
                 target_tokens=budget.target_tokens,
                 tools=tuple(tools),
@@ -433,7 +450,3 @@ class ContextManager:
             summary_error=summary_error,
             reason=reason,
         )
-
-
-
-

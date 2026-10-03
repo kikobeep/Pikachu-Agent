@@ -154,6 +154,7 @@ class AgentRuntime:
         run_id: str | None = None,
         recovery_run_id: str | None = None,
         mode: AgentMode = AgentMode.DEFAULT,
+        source: str | None = None,
     ) -> AgentResult:
 
         run_id = run_id or uuid4().hex
@@ -194,6 +195,20 @@ class AgentRuntime:
                     mode=mode,
                     additional_system_prompt=ace_selection.prompt() or None,
                 )
+                if self._ace is not None:
+                    ace_selection = self._ace.resolve_selection(
+                        ace_selection,
+                        result.content,
+                    )
+                    cleaned = self._ace.clean_generator_output(result.content)
+                    if cleaned != result.content:
+                        result = result.model_copy(
+                            update={
+                                "final_message": result.final_message.model_copy(
+                                    update={"content": cleaned}
+                                ),
+                            }
+                        )
             except BaseException as exc:
                 if self._checkpoint_store is not None:
                     with suppress(Exception):
@@ -245,7 +260,11 @@ class AgentRuntime:
                 conversation_id=conversation_id,
                 emitter=emitter,
             )
-            if self._ace is not None:
+            # Polyglot evaluation supplies the authoritative test result after
+            # this method returns. Do not learn from an unlabelled initial run
+            # or from the feedback repair run; the evaluator explicitly calls
+            # AceCoordinator.reflect() for the initial trajectory.
+            if self._ace is not None and source not in {"eval_initial", "eval_feedback"}:
                 # ACE reflection is deliberately detached from the user-facing run:
                 # a slow/failing reflector must never delay or change the answer.
                 task = asyncio.create_task(
