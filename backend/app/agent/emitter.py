@@ -46,3 +46,23 @@ class EventEmitter:
             await self._handler.handle(event)
         except Exception:
             return
+
+    async def request(
+        self,
+        event_type: AgentEventType,
+        **payload: Any,
+    ) -> Any:
+        """向事件处理器发起一次可返回结果的交互请求。"""
+
+        event = AgentEvent(
+            run_id=self._run_id,
+            conversation_id=self._conversation_id,
+            sequence=self._sequence,
+            type=event_type,
+            **payload,
+        )
+        self._sequence += 1
+        try:
+            return await self._handler.handle(event)
+        except Exception:
+            return None

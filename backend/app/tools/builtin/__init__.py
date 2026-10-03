@@ -42,7 +42,10 @@ def builtin_tool_registry(
         )
     )
     registry.register(HttpRequestTool())
-    registry.register(WebSearchTool(settings=search_settings))
+    # 搜索是可选配置，但工具本身始终注册。没有 TAVILY_API_KEY 时由
+    # WebSearchTool 延迟到真正调用时提示配置，而不是让模型误以为没有搜索能力。
+    effective_search_settings = search_settings or SearchSettings()
+    registry.register(WebSearchTool(settings=effective_search_settings))
     return registry
 
 

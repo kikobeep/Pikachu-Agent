@@ -14,6 +14,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 from app.model.config import ModelConfig, ModelProvider
+from app.tools.search.settings import SearchSettings
 from dotenv import set_key
 from pydantic import SecretStr
 
@@ -226,6 +227,10 @@ async def run_setup(
         except Exception as exc:
             output_fn(f"保存失败（{type(exc).__name__}），原配置未被替换。")
             return False
+        # 配置向导可能是在当前 Pikachu 进程里触发的。下一步会立即重新
+        # 创建 Application；把本次明确选择的 provider 同步到当前进程，
+        # 避免旧的 MODEL_DEFAULT_PROVIDER 环境变量继续把选择覆盖回去。
+        os.environ["MODEL_DEFAULT_PROVIDER"] = selected.value
         output_fn("配置已保存。")
 
         if await _confirm("立即测试连接？[Y/n] ", input_fn):
@@ -302,6 +307,13 @@ def _save_config(path: Path, updates: dict[str, str]) -> None:
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def save_search_api_key(api_key: str) -> None:
+    """保存交互式搜索配置，不回显或记录 key。"""
+
+    path = Path(SearchSettings.model_config["env_file"]).expanduser().absolute()
+    _save_config(path, {"TAVILY_API_KEY": api_key})
 
 
 async def _test_connection(settings: ModelConfig, provider: ModelProvider) -> float:
@@ -605,4 +617,4 @@ def print_help() -> None:
     )
 
 
-__all__ = ['print_banner', 'format_power_bar', 'print_startup_status', 'print_conversation_divider', 'run_setup', 'print_agent_event', 'print_assistant_message', 'print_recovered_runs', 'print_memories', 'print_memory', 'print_permission_rules', 'print_checkpoints', 'print_trace', 'print_help']
+__all__ = ['print_banner', 'format_power_bar', 'print_startup_status', 'print_conversation_divider', 'run_setup', 'save_search_api_key', 'print_agent_event', 'print_assistant_message', 'print_recovered_runs', 'print_memories', 'print_memory', 'print_permission_rules', 'print_checkpoints', 'print_trace', 'print_help']

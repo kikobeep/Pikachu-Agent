@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import sys
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from .cli_ui import (
     print_help,
     print_startup_status,
     run_setup,
+    save_search_api_key,
     print_checkpoints as _print_checkpoints,
     print_memories as _print_memories,
     print_memory as _print_memory,
@@ -42,6 +44,24 @@ from app.task import (
 
 class CliEventHandler:
     async def handle(self, event):
+        from app.agent.events import AgentEventType
+
+        if event.type is AgentEventType.TOOL_CONFIGURATION_REQUIRED:
+            print("\n｜请填写TAVILY_API_KEY完成网络搜索，或直接回车不作网络搜索")
+            api_key = await asyncio.to_thread(
+                getpass.getpass,
+                "TAVILY_API_KEY（不回显）：",
+            )
+            if api_key.strip():
+                await asyncio.to_thread(save_search_api_key, api_key.strip())
+                # 当前进程中的 SearchSettings 也会由 ToolRoundExecutor 更新；
+                # 环境变量同步是为了后续新建的 settings 实例立即可见。
+                import os
+
+                os.environ["TAVILY_API_KEY"] = api_key.strip()
+                print("已保存 TAVILY_API_KEY，正在重试网页搜索。")
+                return api_key.strip()
+            return None
         _print_agent_event(event)
 
 
@@ -76,7 +96,9 @@ async def _run(args,*,offer_setup: bool = True,):
             workspace_root=workspace_root,
         )
     except ValueError as exc:
-        missing_provider = "No model provider is configured" in str(exc)
+        # 不同配置入口可能抛出不同文案：既要识别“没有配置 Provider”，
+        # 也要识别具体的“Provider 'openai' is not configured”。
+        missing_provider = "not configured" in str(exc).lower()
         if (
             offer_setup     # 启动时如果发现没有配置模型，是否允许自动进入设置向导
             and missing_provider
@@ -89,7 +111,7 @@ async def _run(args,*,offer_setup: bool = True,):
             return 0
         print(f"启动失败：{exc}", file=sys.stderr)
         print(
-            "请运行 `.venv/bin/python -m app --setup` 完成模型配置。",
+            "请重新运行 `pikachu` 进入配置向导，或运行 `pikachu --setup` 手动配置。",
             file=sys.stderr,
         )
         return 2
@@ -115,11 +137,17 @@ async def _run(args,*,offer_setup: bool = True,):
             return 2
     
         action = "会话已恢复" if resumed else "新会话已创建"
-        search_tool = tool_registry.get("web_search")
+        try:
+            search_tool = tool_registry.get("web_search")
+        except KeyError:
+            # 保持对旧注册表实现的兼容；当前实现始终注册 web_search。
+            search_tool = None
         search_status = "未启用"
         if isinstance(search_tool, WebSearchTool):
-            if search_tool.provider_name == "tavily":
-                search_status = "Tavily · DuckDuckGo fallback"
+            if not search_tool.is_configured:
+                search_status = "Tavily · 待配置 API Key"
+            elif search_tool.provider_name == "tavily":
+                search_status = "Tavily"
             else:
                 search_status = "DuckDuckGo · 配置 TAVILY_API_KEY 可启用 Tavily"
 

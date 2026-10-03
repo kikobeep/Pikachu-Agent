@@ -1,8 +1,8 @@
-# Sidekick
+# Pikachu
 
 > A local agent runtime for completing, recovering, and learning from software tasks.
 
-Sidekick turns an LLM into a bounded coding agent. It can inspect a workspace, edit files, run verification commands, maintain task state, and continue interrupted work with the context that matters.
+Pikachu turns an LLM into a bounded coding agent. It can inspect a workspace, edit files, run verification commands, maintain task state, and continue interrupted work with the context that matters.
 
 ```text
 Understand → Act → Verify → Recover → Learn
@@ -10,8 +10,8 @@ Understand → Act → Verify → Recover → Learn
 
 ## Contents
 
-- [Why Sidekick](#why-sidekick)
-- [What Sidekick provides](#what-sidekick-provides)
+- [Why Pikachu](#why-Pikachu)
+- [What Pikachu provides](#what-Pikachu-provides)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
 - [Polyglot evaluation](#polyglot-evaluation)
@@ -20,13 +20,13 @@ Understand → Act → Verify → Recover → Learn
 - [Project layout](#project-layout)
 - [Troubleshooting](#troubleshooting)
 
-## Why Sidekick
+## Why Pikachu
 
-Most coding-agent demos show the visible loop: a prompt goes in and a code change comes out. Sidekick focuses on the engineering system around that loop—how an agent acts inside a real workspace, keeps the right context, verifies its work, and continues after interruption.
+Most coding-agent demos show the visible loop: a prompt goes in and a code change comes out. Pikachu focuses on the engineering system around that loop—how an agent acts inside a real workspace, keeps the right context, verifies its work, and continues after interruption.
 
-Sidekick is intentionally a local, inspectable runtime rather than a full product platform. Its scope is small enough that the execution loop, context pipeline, persistence layer, and learning mechanisms can be read and adapted end to end.
+Pikachu is intentionally a local, inspectable runtime rather than a full product platform. Its scope is small enough that the execution loop, context pipeline, persistence layer, and learning mechanisms can be read and adapted end to end.
 
-| Dimension | Sidekick |
+| Dimension | Pikachu |
 | --- | --- |
 | Primary goal | Make coding-agent execution observable, bounded, and resumable |
 | Core loop | Understand a task, use tools, modify the workspace, and verify the result |
@@ -37,7 +37,7 @@ Sidekick is intentionally a local, inspectable runtime rather than a full produc
 
 The goal is not to maximize the number of platform features. It is to provide a complete enough agent runtime that its behavior can be inspected, measured, and extended without losing sight of the underlying execution model.
 
-## What Sidekick provides
+## What Pikachu provides
 
 ### Agent execution
 
@@ -48,7 +48,7 @@ The goal is not to maximize the number of platform features. It is to provide a 
 
 ### Context management
 
-Sidekick assembles six kinds of context before each model request:
+Pikachu assembles six kinds of context before each model request:
 
 - **History** — current conversation and tool results;
 - **Memory** — persistent user preferences, facts, and constraints;
@@ -132,7 +132,7 @@ Playbooks are stored at `.database/ace/<language>_playbook.txt`.
 ### Requirements
 
 - Python 3.13 or newer;
-- [`uv`](https://docs.astral.sh/uv/);
+- [`pipx`](https://pipx.pypa.io/);
 - an API key for a supported model provider;
 - Node.js for JavaScript evaluation;
 - a C++ compiler and CMake for C++ evaluation.
@@ -140,27 +140,25 @@ Playbooks are stored at `.database/ace/<language>_playbook.txt`.
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/kikobeep/Sidekick.git
-cd Sidekick
+git clone https://github.com/kikobeep/Pikachu.git
+cd Pikachu
 
-uv venv backend/.venv
-uv pip install \
-  --python backend/.venv/bin/python \
-  -r backend/requirements.txt
+pipx install ./backend
 ```
 
-For Python Polyglot evaluation:
+If `pipx` is not installed, install it first. On macOS with Homebrew:
 
 ```bash
-uv pip install \
-  --python backend/.venv/bin/python \
-  pytest
+brew install pipx
+pipx ensurepath
 ```
 
-Verify that commands use the project interpreter:
+On other platforms, follow the [`pipx` installation guide](https://pipx.pypa.io/stable/installation/).
+
+To install the local checkout in editable mode while developing Pikachu:
 
 ```bash
-backend/.venv/bin/python -c "import sys; print(sys.executable)"
+pipx install --editable ./backend
 ```
 
 ### 2. Configure a model provider
@@ -179,10 +177,12 @@ Do not commit API keys. The backend loads this file at startup; environment vari
 ### 3. Start the CLI
 
 ```bash
-PYTHONPATH=backend \
-backend/.venv/bin/python \
--m app
+pikachu
 ```
+
+Pikachu starts the TUI directly. If no model provider has been configured yet,
+it opens the setup flow automatically. You do not need to enter `backend`,
+activate a virtual environment, or run `python -m app --setup` manually.
 
 ## Polyglot evaluation
 
@@ -289,11 +289,11 @@ For the four metrics above, the reported results are grouped by agent family:
 |  | bge-embedding-en-large | 27.66 | 37.23 | 29.33 | 36.40 |
 |  | Mem0 | 29.00 | 41.62 | 34.67 | 40.01 |
 | **Agentic Memory Agents** |  |  |  |  |  |
-|  | Sidekick | 41.00 | 53.93 | 46.33 | 51.16 |
+|  | Pikachu | 41.00 | 53.93 | 46.33 | 51.16 |
 
-Compared with Sidekick without ACE, adding ACE improves all four reported metrics:
+Compared with Pikachu without ACE, adding ACE improves all four reported metrics:
 
-| Metric | Sidekick | Sidekick + ACE | Change |
+| Metric | Pikachu | Pikachu + ACE | Change |
 | --- | ---: | ---: | ---: |
 | Extract Match | 41.00 | 42.33 | +1.33 |
 | F1 | 53.93 | 55.44 | +1.51 |
@@ -312,7 +312,7 @@ The benchmark metric definitions follow MemoryAgentBench's evaluation mapping; i
 ## Project layout
 
 ```text
-sidekick-main/
+Pikachu-main/
 ├── backend/
 │   ├── app/
 │   │   ├── agent/              # Agent loop, runtime, budgets, context injection

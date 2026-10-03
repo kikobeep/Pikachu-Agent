@@ -17,6 +17,7 @@ from app.tools.config import ToolExecutionContext
 from app.tools.hooks import ToolHook
 from app.tools.register import TOOL_SEARCH_NAME, ToolRegistry, activated_tool_names
 from app.agent.emitter import EventEmitter
+from app.agent.events import AgentEventType
 
 @dataclass(frozen=True, slots=True)
 class ToolRoundOutcome:
@@ -117,6 +118,34 @@ class ToolRoundExecutor:
                 closing_can_deliver=closing_can_deliver,
                 activated_tools=activated_tools
             )
+
+            # 缺少搜索凭据不是普通工具参数错误：让 CLI 通过 emitter
+            # 交互式收集 key，输入后只重试当前搜索，不把 key 放入模型上下文。
+            if (
+                not result.success
+                and tool_call.name == "web_search"
+                and result.error
+                and "TAVILY_API_KEY" in result.error
+            ):
+                api_key = await emitter.request(
+                    AgentEventType.TOOL_CONFIGURATION_REQUIRED,
+                    step=step,
+                    tool_call=tool_call,
+                    configuration_name="TAVILY_API_KEY",
+                )
+                if isinstance(api_key, str) and api_key.strip():
+                    tool = self._registry.get("web_search")
+                    configure = getattr(tool, "configure_api_key", None)
+                    if callable(configure):
+                        configure(api_key.strip())
+                        result = await self._execute_one(
+                            tool_call,
+                            context=context,
+                            hook=hook,
+                            mode=mode,
+                            closing_can_deliver=closing_can_deliver,
+                            activated_tools=activated_tools,
+                        )
 
             if self._checkpoint_store is not None:
                 await self._checkpoint_store.complete_tool(run_id, result)

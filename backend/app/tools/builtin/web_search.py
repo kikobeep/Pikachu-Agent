@@ -8,6 +8,7 @@ from app.tools.config import BaseTool, ToolDefinition, ToolPermission
 from app.tools.search.base import SearchRequest
 from app.tools.search.service import SearchService, build_search_service
 from app.tools.search.settings import SearchSettings
+from pydantic import SecretStr
 
 MAX_QUERY_CHARS = 500
 
@@ -22,7 +23,10 @@ class WebSearchTool(BaseTool):
         settings: SearchSettings | None = None,
     ) -> None:
         config = settings or SearchSettings()
-        self._service = service or build_search_service(config)
+        # 延迟创建 SearchService。这样没有 TAVILY_API_KEY 时，工具仍然
+        # 可以出现在模型的工具列表中；只有模型真正请求搜索时才提示配置。
+        self._settings = config
+        self._service = service
         self._max_results = config.search_max_results
 
     @property
@@ -79,9 +83,39 @@ class WebSearchTool(BaseTool):
     def provider_name(self) -> str:
         """返回当前首选搜索提供商名称，供 CLI 显示。"""
 
-        return self._service.primary_provider
+        return self._service.primary_provider if self._service else "tavily"
+
+    @property
+    def is_configured(self) -> bool:
+        """搜索凭据是否已配置。"""
+
+        return self._settings.tavily_api_key_value() is not None
+
+    def configure_api_key(self, api_key: str) -> None:
+        """注入刚由 CLI 收集的 key，并供当前 Run 立即重试。"""
+
+        self._settings.tavily_api_key = SecretStr(api_key)
+        self._service = None
+
+    def refresh_configuration(self) -> None:
+        """重新读取配置文件，覆盖启动后才写入的搜索凭据。"""
+
+        latest = SearchSettings()
+        if latest.tavily_api_key_value() is not None:
+            self._settings = latest
+            self._service = None
 
     async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        # CLI 交互式配置可能发生在 Application 启动之后；每次实际搜索
+        # 前刷新一次，避免继续使用旧的、没有 API key 的 settings 快照。
+        self.refresh_configuration()
+        if not self.is_configured:
+            raise ValueError(
+                "网页搜索尚未配置 TAVILY_API_KEY。请先让用户输入 Tavily API Key，"
+                "保存到 backend/.config 后再重试；不要直接说当前没有联网能力。"
+            )
+        if self._service is None:
+            self._service = build_search_service(self._settings)
         raw_max_results = arguments.get("max_results", self._max_results)
         if type(raw_max_results) is not int or raw_max_results < 1:
             raise ValueError("max_results must be a positive integer")

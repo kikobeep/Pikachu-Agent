@@ -31,6 +31,7 @@ class AgentEventType(StrEnum):
     TOOL_COMPLETED = "tool_completed"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     TOOL_APPROVAL_COMPLETED = "tool_approval_completed"
+    TOOL_CONFIGURATION_REQUIRED = "tool_configuration_required"
     MEMORY_REFLECTION_STARTED = "memory_reflection_started"
     MEMORY_REFLECTION_COMPLETED = "memory_reflection_completed"
     MEMORY_REFLECTION_FAILED = "memory_reflection_failed"
@@ -74,6 +75,7 @@ class AgentEvent(BaseModel):
     approval_decision: ApprovalDecision | None = None
     rule_id: str | None = None
     rule_description: str | None = None
+    configuration_name: str | None = None
     original_estimated_input_tokens: int | None = Field(default=None, ge=0)
     prepared_input_tokens: int | None = Field(default=None, ge=0)
     estimated_input_tokens: int | None = Field(default=None, ge=0)
