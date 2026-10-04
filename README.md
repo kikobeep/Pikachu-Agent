@@ -16,15 +16,15 @@ These recordings show Pikachu running in the local TUI.
 
 - PLAN MODE and sequential plan execution
 
-<video src="docs/demos/plan_mode.mp4" controls width="960"></video>
+![PLAN MODE and sequential plan execution](docs/demos/plan_mode.gif)
 
-[Open the PLAN MODE demo video](docs/demos/plan_mode.mp4)
+[Download the PLAN MODE demo video](docs/demos/plan_mode.mp4)
 
 - Memory
 
-<video src="docs/demos/compact_demo.mp4" controls width="960"></video>
+![Context compaction and summary](docs/demos/compact_demo.gif)
 
-[Open the context compaction demo video](docs/demos/compact_demo.mp4)
+[Download the context compaction demo video](docs/demos/compact_demo.mp4)
 
 - Context compaction and summary
 
@@ -300,18 +300,72 @@ The primary metrics are:
 
 For the four metrics above, the reported results are grouped by agent family:
 
-| Agent family | Method | Extract Match | F1 | substring_exact_match | rougeL_f1 |
-| --- | --- | ---: | ---: | ---: | ---: |
-| **Long-Context Agents** |  |  |  |  |  |
-|  | Deepseek | 37.66 | 50.55 | 40.66 | 57.93 |
-| **RAG Agents** |  |  |  |  |  |
-|  | BM25 | 34.33 | 46.58 | 36.66 | 45.87 |
-|  | bge-embedding-en-small | 25.66 | 36.68 | 27.66 | 35.77 |
-|  | bge-embedding-en | 28.00 | 38.20 | 29.66 | 37.52 |
-|  | bge-embedding-en-large | 27.66 | 37.23 | 29.33 | 36.40 |
-|  | Mem0 | 29.00 | 41.62 | 34.67 | 40.01 |
-| **Agentic Memory Agents** |  |  |  |  |  |
-|  | Pikachu | 41.00 | 53.93 | 46.33 | 51.16 |
+<table>
+  <thead>
+    <tr>
+      <th>Agent family</th>
+      <th>Method</th>
+      <th>Extract Match</th>
+      <th>F1</th>
+      <th>substring_exact_match</th>
+      <th>rougeL_f1</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="1"><strong>Long-Context Agents</strong></td>
+      <td>Deepseek</td>
+      <td>37.66</td>
+      <td>50.55</td>
+      <td>40.66</td>
+      <td>57.93</td>
+    </tr>
+    <tr>
+      <td rowspan="5"><strong>RAG Agents</strong></td>
+      <td>BM25</td>
+      <td>34.33</td>
+      <td>46.58</td>
+      <td>36.66</td>
+      <td>45.87</td>
+    </tr>
+    <tr>
+      <td>bge-embedding-en-small</td>
+      <td>25.66</td>
+      <td>36.68</td>
+      <td>27.66</td>
+      <td>35.77</td>
+    </tr>
+    <tr>
+      <td>bge-embedding-en</td>
+      <td>28.00</td>
+      <td>38.20</td>
+      <td>29.66</td>
+      <td>37.52</td>
+    </tr>
+    <tr>
+      <td>bge-embedding-en-large</td>
+      <td>27.66</td>
+      <td>37.23</td>
+      <td>29.33</td>
+      <td>36.40</td>
+    </tr>
+    <tr>
+      <td>Mem0</td>
+      <td>29.00</td>
+      <td>41.62</td>
+      <td>34.67</td>
+      <td>40.01</td>
+    </tr>
+    <tr>
+      <td rowspan="1"><strong>Agentic Memory Agents</strong></td>
+      <td>Pikachu</td>
+      <td>41.00</td>
+      <td>53.93</td>
+      <td>46.33</td>
+      <td>51.16</td>
+    </tr>
+  </tbody>
+</table>
 
 Compared with Pikachu without ACE, adding ACE improves all four reported metrics:
 
