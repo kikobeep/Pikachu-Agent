@@ -16,13 +16,13 @@ These recordings show Pikachu running in the local TUI.
 
 - PLAN MODE and sequential plan execution
 
-![PLAN MODE and sequential plan execution](docs/demos/plan_mode_2x.gif)
+![PLAN MODE and sequential plan execution](docs/demos/plan_mode_2x_hd.gif)
 
 [Download the PLAN MODE demo video](docs/demos/plan_mode.mp4)
 
 - Memory
 
-![Context compaction and summary](docs/demos/compact_demo_2x.gif)
+![Context compaction and summary](docs/demos/compact_demo_2x_hd.gif)
 
 [Download the context compaction demo video](docs/demos/compact_demo.mp4)
 
