@@ -170,6 +170,7 @@ class ContextManager:
         summary_state: ConversationSummaryState | None = None,
         handoff: bool = False,
         trigger: TaskBoundaryTrigger = TaskBoundaryTrigger.AUTO,
+        force_compaction: bool = False,
     ) -> ContextDecision:
         trigger = TaskBoundaryTrigger(trigger)
 
@@ -236,7 +237,7 @@ class ContextManager:
         )
         task_triggered = trigger is TaskBoundaryTrigger.TASK
 
-        if tool_results_requires_reduction or task_triggered:
+        if tool_results_requires_reduction or task_triggered or force_compaction:
             tool_results_reduction = self._tool_reducer.project(
                 original_messages,
                 original_estimated=prepared_input_tokens,
@@ -270,6 +271,7 @@ class ContextManager:
         )
         conversation_requires_compaction = (
             task_triggered
+            or force_compaction
             or prepared_input_tokens >= budget.trigger_tokens
             or conversation_block_triggered
         )
@@ -306,7 +308,7 @@ class ContextManager:
                 # TASK 是一次旧任务切换压缩：复用当前 summary 字段和 reducer，
                 # 但不保留旧的近期对话块；最新用户消息仍在 current_messages 中。
                 handoff=handoff or task_triggered,
-                force=task_triggered,
+                force=task_triggered or force_compaction,
                 initial_estimated_input_tokens=prepared_input_tokens,
                 target_tokens=budget.target_tokens,
                 tools=tuple(tools),

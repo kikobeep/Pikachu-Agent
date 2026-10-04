@@ -14,14 +14,13 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from app.model.config import AgentMode
-from app.task.config import (
-    Task,
-    TaskPatch,
-    TaskPriority,
-    TaskStatus,
-    TaskStep,
-    TaskStepStatus,
+from app.plan.config import (
+    Plan,
+    PlanPatch,
+    PlanPriority,
+    PlanStatus,
+    PlanStep,
+    PlanStepStatus,
 )
 from app.tools.config import BaseTool, ToolDefinition
 from app.tools.register import ToolRegistry
@@ -32,7 +31,7 @@ from .store import PlanStore
 _MAX_LIST_LIMIT = 100
 
 
-class TaskCreateTool(BaseTool):
+class PlanCreateTool(BaseTool):
     """创建用于长期跟踪进度的任务。"""
 
     def __init__(self, store: PlanStore) -> None:
@@ -67,7 +66,7 @@ class TaskCreateTool(BaseTool):
                     },
                     "priority": {
                         "type": "string",
-                        "enum": [p.value for p in TaskPriority],
+                        "enum": [p.value for p in PlanPriority],
                         "description": "可选的任务优先级，默认 normal。",
                     },
                     "steps": {
@@ -125,14 +124,14 @@ class TaskCreateTool(BaseTool):
         if goal is not None and not isinstance(goal, str):
             raise ValueError("'goal' must be a string")
 
-        priority = TaskPriority.NORMAL
+        priority = PlanPriority.NORMAL
         raw_priority = arguments.get("priority")
         if raw_priority is not None:
-            priority = TaskPriority(raw_priority)
+            priority = PlanPriority(raw_priority)
 
         steps = _build_steps(arguments.get("steps"))
 
-        task = await self._store.create(
+        plan = await self._store.create(
             title=title,
             description=description,
             goal=goal,
@@ -145,10 +144,10 @@ class TaskCreateTool(BaseTool):
                 else ()
             ),
         )
-        return _plan_payload(task)
+        return _plan_payload(plan)
 
 
-class TaskUpdateTool(BaseTool):
+class PlanUpdateTool(BaseTool):
     """更新任务：推进步骤、改变状态、补充约束/事实或关联执行记录。"""
 
     def __init__(self, store: PlanStore) -> None:
@@ -177,7 +176,7 @@ class TaskUpdateTool(BaseTool):
                     },
                     "status": {
                         "type": "string",
-                        "enum": [s.value for s in TaskStatus],
+                        "enum": [s.value for s in PlanStatus],
                         "description": (
                             "新的任务状态；当步骤 blocked（等待用户输入或外部"
                             "条件）时，可把任务置为 paused，使下次恢复时模型"
@@ -203,34 +202,13 @@ class TaskUpdateTool(BaseTool):
                         "items": {"type": "string"},
                         "description": "追加的关键事实或决策（去重）。",
                     },
-                    "steps": {
-                        "type": "array",
-                        "description": (
-                            "可选的新步骤计划；提供时整体替换当前步骤。已有步骤应"
-                            "保留原 id，新步骤可省略 id 由系统生成。"
-                        ),
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "id": {"type": "string"},
-                                "title": {"type": "string"},
-                                "status": {
-                                    "type": "string",
-                                    "enum": [s.value for s in TaskStepStatus],
-                                },
-                                "note": {"type": "string"},
-                            },
-                            "required": ["title"],
-                            "additionalProperties": False,
-                        },
-                    },
                     "step_id": {
                         "type": "string",
                         "description": "要推进的步骤 ID；与 step_status 配合。",
                     },
                     "step_status": {
                         "type": "string",
-                        "enum": [s.value for s in TaskStepStatus],
+                        "enum": [s.value for s in PlanStepStatus],
                         "description": (
                             "步骤的新状态；标记为 done 时必须同时提供 "
                             "step_note 记录完成依据，标记为 blocked 时必须"
@@ -287,7 +265,6 @@ class TaskUpdateTool(BaseTool):
                 "state",
                 "constraints",
                 "facts",
-                "steps",
                 "step_id",
                 "step_status",
             )
@@ -297,19 +274,6 @@ class TaskUpdateTool(BaseTool):
                 "plan_update requires at least one update field besides plan_id"
             )
 
-        if context is not None and context.mode is AgentMode.PLAN:
-            if "status" in arguments:
-                raise ValueError(
-                    "plan mode 下不能直接改变任务状态；任务由用户接受后才开始"
-                )
-            if (
-                arguments.get("step_id") is not None
-                or arguments.get("step_status") is not None
-            ):
-                raise ValueError(
-                    "plan mode 下不能推进步骤状态；只允许更新计划内容"
-                )
-
         # 先验证全部字段，再执行一次原子写入。
         step_id = arguments.get("step_id")
         step_status = arguments.get("step_status")
@@ -318,14 +282,6 @@ class TaskUpdateTool(BaseTool):
                 raise ValueError(
                     "'step_id' and 'step_status' must be provided together"
                 )
-        if "steps" in arguments and (
-            step_id is not None
-            or step_status is not None
-            or "step_note" in arguments
-        ):
-            raise ValueError(
-                "'steps' cannot be combined with step_id/step_status/step_note"
-            )
         goal: str | None = None
         if "goal" in arguments:
             goal = arguments["goal"]
@@ -355,11 +311,8 @@ class TaskUpdateTool(BaseTool):
             ):
                 raise ValueError("'facts' must be a list of strings")
             facts = tuple(raw_facts)
-        replacement_steps: tuple[TaskStep, ...] | None = None
-        if "steps" in arguments:
-            replacement_steps = _build_update_steps(arguments["steps"])
         status = (
-            TaskStatus(arguments["status"])
+            PlanStatus(arguments["status"])
             if "status" in arguments
             else None
         )
@@ -385,7 +338,7 @@ class TaskUpdateTool(BaseTool):
             )
 
         conversation_id = _require_conversation_id(context)
-        task = await _resolve_owned(self._store, plan_id, conversation_id)
+        plan = await _resolve_owned(self._store, plan_id, conversation_id)
 
         patch_data: dict[str, Any] = {
             "status": status,
@@ -393,7 +346,7 @@ class TaskUpdateTool(BaseTool):
             "add_key_facts": facts,
             "step_id": step_id,
             "step_status": (
-                TaskStepStatus(step_status) if step_status is not None else None
+                PlanStepStatus(step_status) if step_status is not None else None
             ),
             "expected_revision": expected_revision,
             "run_id": context.run_id if context is not None else None,
@@ -402,21 +355,19 @@ class TaskUpdateTool(BaseTool):
             patch_data["goal"] = goal
         if "state" in arguments:
             patch_data["state"] = state
-        if "steps" in arguments:
-            patch_data["replace_steps"] = replacement_steps
         if "step_note" in arguments:
             patch_data["step_note"] = step_note
 
-        task = await self._store.apply_patch(
-            task.id,
-            TaskPatch.model_validate(patch_data),
+        plan = await self._store.apply_patch(
+            plan.id,
+            PlanPatch.model_validate(patch_data),
             owner_conversation_id=conversation_id,
         )
 
-        return _plan_payload(task)
+        return _plan_payload(plan)
 
 
-class TaskGetTool(BaseTool):
+class PlanGetTool(BaseTool):
     """获取单个任务的完整详情，用于重新确认当前状态。"""
 
     def __init__(self, store: PlanStore) -> None:
@@ -468,11 +419,11 @@ class TaskGetTool(BaseTool):
         if not isinstance(plan_id, str) or not plan_id.strip():
             raise ValueError("'plan_id' must be a non-empty string")
         conversation_id = _require_conversation_id(context)
-        task = await _resolve_owned(self._store, plan_id, conversation_id)
-        return _plan_payload(task)
+        plan = await _resolve_owned(self._store, plan_id, conversation_id)
+        return _plan_payload(plan)
 
 
-class TaskListTool(BaseTool):
+class PlanListTool(BaseTool):
     """列出任务，可按状态过滤。"""
 
     def __init__(self, store: PlanStore) -> None:
@@ -492,7 +443,7 @@ class TaskListTool(BaseTool):
                 "properties": {
                     "status": {
                         "type": "string",
-                        "enum": [s.value for s in TaskStatus],
+                        "enum": [s.value for s in PlanStatus],
                         "description": "可选的状态过滤。",
                     },
                     "limit": {
@@ -531,37 +482,37 @@ class TaskListTool(BaseTool):
                 f"'limit' must be an integer between 1 and {_MAX_LIST_LIMIT}"
             )
 
-        status: TaskStatus | None = None
+        status: PlanStatus | None = None
         raw_status = arguments.get("status")
         if raw_status is not None:
-            status = TaskStatus(raw_status)
+            status = PlanStatus(raw_status)
 
         conversation_id = _require_conversation_id(context)
-        tasks = await self._store.list(
+        plans = await self._store.list(
             limit=limit,
             status=status,
             owner_conversation_id=conversation_id,
         )
         return {
-            "count": len(tasks),
-            "tasks": [_task_brief(task) for task in tasks],
+            "count": len(plans),
+            "plans": [_plan_brief(plan) for plan in plans],
         }
 
 
 def register_plan_tools(registry: ToolRegistry, store: PlanStore) -> None:
     """把任务管理工具注册进已有工具注册表。"""
 
-    registry.register(TaskCreateTool(store))
-    registry.register(TaskUpdateTool(store))
-    registry.register(TaskGetTool(store))
-    registry.register(TaskListTool(store))
+    registry.register(PlanCreateTool(store))
+    registry.register(PlanUpdateTool(store))
+    registry.register(PlanGetTool(store))
+    registry.register(PlanListTool(store))
 
 
 async def _resolve_owned(
     store: PlanStore,
     plan_id: str,
     conversation_id: str,
-) -> Task:
+) -> Plan:
     """先按当前会话归属过滤，再解析任务 ID 或唯一前缀。
 
     任务不存在或不属于当前会话时统一返回“任务不存在”，避免泄露
@@ -570,15 +521,15 @@ async def _resolve_owned(
 
     normalized = plan_id.strip()
     if normalized.lower() == "current":
-        task = await store.active_plan_for_conversation(conversation_id)
+        plan = await store.active_plan_for_conversation(conversation_id)
     else:
-        task = await store.resolve(
+        plan = await store.resolve(
             normalized,
             owner_conversation_id=conversation_id,
         )
-    if task is None:
+    if plan is None:
         raise KeyError(f"计划不存在：{plan_id}")
-    return task
+    return plan
 
 
 def _require_conversation_id(
@@ -587,34 +538,34 @@ def _require_conversation_id(
     """模型任务工具必须在一个可识别的会话中执行。"""
 
     if context is None or not context.conversation_id:
-        raise ValueError("task tool requires conversation context")
+        raise ValueError("plan tool requires conversation context")
     return context.conversation_id
 
 
-def _task_brief(task: Task) -> dict[str, Any]:
+def _plan_brief(plan: Plan) -> dict[str, Any]:
     return {
-        "plan_id": task.id,
-        "title": task.title,
-        "status": task.status.value,
-        "priority": task.priority.value,
-        "goal": task.goal,
-        "progress": task.progress_summary,
-        "updated_at": task.updated_at.isoformat(),
+        "plan_id": plan.id,
+        "title": plan.title,
+        "status": plan.status.value,
+        "priority": plan.priority.value,
+        "goal": plan.goal,
+        "progress": plan.progress_summary,
+        "updated_at": plan.updated_at.isoformat(),
     }
 
 
-def _plan_payload(task: Task) -> dict[str, Any]:
-    payload = task.model_dump(mode="json")
+def _plan_payload(plan: Plan) -> dict[str, Any]:
+    payload = plan.model_dump(mode="json")
     payload["plan_id"] = payload.pop("id")
     return payload
 
 
-def _build_steps(raw_steps: object) -> tuple[TaskStep, ...]:
+def _build_steps(raw_steps: object) -> tuple[PlanStep, ...]:
     if raw_steps is None:
         return ()
     if not isinstance(raw_steps, list):
         raise ValueError("'steps' must be a list")
-    steps: list[TaskStep] = []
+    steps: list[PlanStep] = []
     for index, item in enumerate(raw_steps):
         if not isinstance(item, dict):
             raise ValueError(f"steps[{index}] must be an object")
@@ -625,7 +576,7 @@ def _build_steps(raw_steps: object) -> tuple[TaskStep, ...]:
         if note is not None and not isinstance(note, str):
             raise ValueError(f"steps[{index}].note must be a string")
         steps.append(
-            TaskStep(
+            PlanStep(
                 id=uuid4().hex,
                 title=title,
                 note=note,
@@ -634,40 +585,10 @@ def _build_steps(raw_steps: object) -> tuple[TaskStep, ...]:
     return tuple(steps)
 
 
-def _build_update_steps(raw_steps: object) -> tuple[TaskStep, ...]:
-    """解析重排后的完整计划，保留已有 ID 并为新增步骤生成 ID。"""
-
-    if not isinstance(raw_steps, list):
-        raise ValueError("'steps' must be a list")
-    steps: list[TaskStep] = []
-    for index, item in enumerate(raw_steps):
-        if not isinstance(item, dict):
-            raise ValueError(f"steps[{index}] must be an object")
-        title = item.get("title")
-        if not isinstance(title, str) or not title.strip():
-            raise ValueError(f"steps[{index}].title must be a non-empty string")
-        step_id = item.get("id") or uuid4().hex
-        if not isinstance(step_id, str) or not step_id.strip():
-            raise ValueError(f"steps[{index}].id must be a non-empty string")
-        note = item.get("note")
-        if note is not None and not isinstance(note, str):
-            raise ValueError(f"steps[{index}].note must be a string")
-        raw_status = item.get("status", TaskStepStatus.TODO.value)
-        steps.append(
-            TaskStep(
-                id=step_id,
-                title=title,
-                status=TaskStepStatus(raw_status),
-                note=note,
-            )
-        )
-    return tuple(steps)
-
-
 __all__ = [
-    "TaskCreateTool",
-    "TaskGetTool",
-    "TaskListTool",
-    "TaskUpdateTool",
+    "PlanCreateTool",
+    "PlanGetTool",
+    "PlanListTool",
+    "PlanUpdateTool",
     "register_plan_tools",
 ]

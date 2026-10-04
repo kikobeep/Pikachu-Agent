@@ -20,8 +20,8 @@ class RecordedToolOutput:
 class ToolOutputAttribution:
     """工具输出所属的可选工作位置，不依赖具体 Evidence 实现。"""
 
-    task_id: str | None = None
-    task_step_id: str | None = None
+    plan_id: str | None = None
+    plan_step_id: str | None = None
 
 
 class ToolOutputAttributionResolver(Protocol):

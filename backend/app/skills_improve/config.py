@@ -21,7 +21,7 @@ class SkillImprovingSettings(BaseSettings):
     )
 
     enabled: bool = False
-    improve_method: str = Field(default="cluster", pattern="^(cluster|multi_teacher)$")
+    improve_method: str = Field(default="multi_teacher", pattern="^(cluster|multi_teacher)$")
     batch_size: int = Field(default=20, ge=1)
     max_runs_per_scan: int = Field(default=100, ge=1)
     provider: str | None = None

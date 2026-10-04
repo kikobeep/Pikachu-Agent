@@ -41,7 +41,8 @@ from app.model.config import ModelProvider, ModelRequest, ModelUsage
 from app.model.registry import ModelAdapterRegistry
 from app.skills.context import SkillContextProvider
 from app.skills.store import SkillStore
-from app.task.context import TaskContextProvider
+from app.plan.context import PlanContextProvider
+from app.plan.runner import PlanRunner
 from app.tools.executor import ToolExecutor
 from app.tools.register import ToolRegistry, ensure_tool_search_registered
 
@@ -64,14 +65,24 @@ from .utils import (
     is_tool_call_text
 )
 _PLAN_MODE_SYSTEM_MESSAGE = (
-    "你现在处于 PLAN MODE（规划模式）：只分析、调查并形成计划，不要修改用户环境。\n"
+    "你现在处于 PLAN MODE（计划执行模式）：按照当前活动计划的 current_step 逐步"
+    "分析、调查和推进计划；不要修改用户环境。\n"
+    "对于用户提出的新规划或多步骤目标，必须先调用 plan_create 创建一个 Plan，"
+    "至少包含 title、goal 和具体 steps；plan_create 成功前不得直接输出最终计划。"
+    "不要为了确认是否存在计划而先调用 plan_list；plan_list 只用于用户要求查看"
+    "已有计划，或明确要求继续已有计划的情况。\n"
+    "默认不要调用 memory_search。只有用户明确要求使用记忆，或当前计划确实依赖"
+    "已保存的个人偏好、历史决定或长期事实时，才调用 memory_search。涉及今天、"
+    "当前日期或相对时间时，可以调用 get_current_time。\n"
     "你可以使用只读 / 搜索工具（read_file、list_files、web_search、get_current_time、"
-    "memory_read、memory_search、history_search/read、evidence_search/read）与任务工具"
+    "memory_read、memory_search、history_search/read、evidence_search/read）以及计划工具"
     "（plan_create、plan_update、plan_get、plan_list）。\n"
-    "完成必要调查后，必须创建（plan_create）或更新（plan_update）一个 PENDING 计划"
-    "作为本轮计划，至少包含 title、goal 与具体可执行的 steps；不要伪造 DONE 步骤、"
-    "已完成 state 或已验证 key_facts。\n"
-    "最后返回简洁的计划说明。"
+    "每次只处理上下文中展示的 current_step，可以调用多个工具；当前步骤获得充分"
+    "证据后，使用 plan_update 将它标记为 done，并填写完成依据；无法继续时标记为"
+    "blocked 并填写原因。不要主动执行后续未展示的步骤，也不要伪造完成状态。\n"
+    "plan_update 只用于更新已有步骤的状态和备注；标记当前步骤状态时传入"
+    "step_id、step_status 和必要的 step_note，不要尝试重建或替换整个步骤列表。\n"
+    "只有当前步骤完成或阻塞后，才能进入下一个步骤；所有步骤完成后再返回总结。"
 )
 
 _TOOL_ROUND_LIMIT_FALLBACK_MESSAGE = (
@@ -97,7 +108,8 @@ class AgentLoop:
         max_output_tokens: int | None,
 
         context_manager: ContextManager,
-        task_context_provider: TaskContextProvider | None,
+        plan_context_provider: PlanContextProvider | None,
+        plan_runner: PlanRunner | None,
         checkpoint_store: CheckpointStore | None,
         memory_manager: MemoryManager | None,
         memory_auto_search_enabled: bool = True,
@@ -123,7 +135,8 @@ class AgentLoop:
         self._max_tool_rounds = max_tool_rounds
         self._max_output_tokens = max_output_tokens
         self._context_manager = context_manager
-        self._task_context_provider = task_context_provider
+        self._plan_context_provider = plan_context_provider
+        self._plan_runner = plan_runner
         self._checkpoint_store = checkpoint_store
         self._memory_manager = memory_manager
         self._memory_auto_search_enabled = memory_auto_search_enabled
@@ -231,7 +244,7 @@ class AgentLoop:
             ),
             skill_store=self._skill_store,
             skill_context_provider=self._skill_context_provider,
-            task_context_provider=self._task_context_provider,
+            plan_context_provider=self._plan_context_provider,
         )
 
         await emitter.emit(
@@ -347,6 +360,20 @@ class AgentLoop:
         except Exception:
             # 边界判断不能阻断主任务；失败时保持当前任务并走 AUTO。
             task_trigger = TaskBoundaryTrigger.AUTO
+
+        # Sequential Plan Execution 只在 PLAN MODE 启用；普通模式继续由模型
+        # 自主参考计划，不由 PlanRunner 自动推进步骤。
+        if self._plan_runner is not None and mode is AgentMode.PLAN:
+            try:
+                await self._plan_runner.on_run_started(
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    emitter=emitter,
+                )
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "plan runner failed while restoring the current plan"
+                )
 
         while True:
             step += 1
@@ -502,14 +529,14 @@ class AgentLoop:
             # 为本次模型请求补充上下文 
             try:
                 # 易变事实通过按需工具获取；Run 级缓存与 Skill 状态由
-                # RuntimeContextSession 管理，Task 仍在每个 Step 重新读取。
+                # RuntimeContextSession 管理，Plan 仍在每个 Step 重新读取。
                 trailing_system_messages: list[Message] = []
 
                 context_injection = await context_session.build(
                     conversation_id=conversation_id,
                     recovery_checkpoint=recovery_checkpoint
                 )
-                context_messages = context_injection.messages
+                context_messages = list(context_injection.messages)
                 if mode is AgentMode.PLAN:
                     context_messages.append(
                         Message(
@@ -526,11 +553,29 @@ class AgentLoop:
                             content=_RUN_BUDGET_WARNING_MESSAGE,
                         )
                     )
-                if context_messages:
+                context_messages = tuple(context_messages)
+                plan_context_messages = tuple(
+                    message
+                    for message in context_messages
+                    if message.name == "PLAN CONTEXT"
+                )
+                other_context_messages = tuple(
+                    message
+                    for message in context_messages
+                    if message.name != "PLAN CONTEXT"
+                )
+                if other_context_messages:
                     request_messages = (
                         *request_messages[:history_message_length],
-                        *context_messages,
+                        *other_context_messages,
                         *request_messages[history_message_length:],
+                    )
+                # Plan 是易变状态。把最新快照放在上一轮工具结果之后，避免模型
+                # 采用历史 tool result 中已经过期的 revision。
+                if plan_context_messages:
+                    request_messages = (
+                        *request_messages,
+                        *plan_context_messages,
                     )
                 
                 if can_use_closing_tools:
@@ -998,6 +1043,27 @@ class AgentLoop:
         
             previous_signature = round_outcome.previous_signature
             repeated_count = round_outcome.repeated_count
+
+            if self._plan_runner is not None and mode is AgentMode.PLAN:
+                try:
+                    if round_outcome.plan_created and round_outcome.plan_id:
+                        await self._plan_runner.on_plan_created(
+                            conversation_id=conversation_id,
+                            plan_id=round_outcome.plan_id,
+                            run_id=run_id,
+                            emitter=emitter,
+                        )
+                    else:
+                        await self._plan_runner.on_tool_round_finished(
+                            conversation_id=conversation_id,
+                            run_id=run_id,
+                            plan_id=round_outcome.plan_id,
+                            emitter=emitter,
+                        )
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "plan runner failed after a tool round"
+                    )
 
             if round_outcome.repeated_error is not None:
                 return self._result(

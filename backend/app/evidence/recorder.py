@@ -38,10 +38,10 @@ class EvidenceRecorder:
         if definition is not None and not definition.record_output:
             return None
         
-        attribution = ToolOutputAttribution() # task_id和task_step 任务归属信息
+        attribution = ToolOutputAttribution() # plan_id和plan_step 计划归属信息
         if self._attribution_resolver is not None:
             try:
-                attribution = await self._attribution_resolver.resolve( # 查询task_id和task_step
+                attribution = await self._attribution_resolver.resolve( # 查询plan_id和plan_step
                     context.conversation_id
                 )
             except Exception:
@@ -55,8 +55,8 @@ class EvidenceRecorder:
             tool_name=tool_name,
             content=content,
             sha256=digest,
-            task_id=attribution.task_id,
-            task_step_id=attribution.task_step_id,
+            plan_id=attribution.plan_id,
+            plan_step_id=attribution.plan_step_id,
         )
         return RecordedToolOutput(
             id=record.id,

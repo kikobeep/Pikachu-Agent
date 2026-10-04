@@ -37,9 +37,7 @@ from .cli_ui import (
     print_trace as _print_trace,
 )
 
-from app.task import (
-    DEFAULT_TASKS_DIR,
-)
+from app.plan import DEFAULT_PLANS_DIR
 
 
 class CliEventHandler:
@@ -86,7 +84,7 @@ async def _run(args,*,offer_setup: bool = True,):
             model=args.model,
             system_prompt=effective_system_prompt,
             database=args.database,
-            tasks_dir=args.tasks_dir,
+            plans_dir=args.plans_dir,
             # mcp_config=args.mcp_config,
             max_steps=args.max_steps,
             max_tool_rounds=args.max_tool_rounds,
@@ -121,8 +119,7 @@ async def _run(args,*,offer_setup: bool = True,):
     try:
         conversation_store = app.conversation_store
         conversation_service = app.conversation_service
-        # automation_scheduler = app.automation_scheduler
-        # mcp_manager = app.mcp_manager
+
         tool_registry = app.tool_registry
 
         try:
@@ -140,7 +137,6 @@ async def _run(args,*,offer_setup: bool = True,):
         try:
             search_tool = tool_registry.get("web_search")
         except KeyError:
-            # 保持对旧注册表实现的兼容；当前实现始终注册 web_search。
             search_tool = None
         search_status = "未启用"
         if isinstance(search_tool, WebSearchTool):
@@ -210,6 +206,7 @@ async def _run(args,*,offer_setup: bool = True,):
                 history=history,
                 content=args.message,
                 model=model,
+                mode=AgentMode.PLAN if args.plan else AgentMode.DEFAULT,
             )
             await _skill_mining(skill_miner)
             return 0 if success else 1
@@ -220,12 +217,13 @@ async def _run(args,*,offer_setup: bool = True,):
             conversation=conversation,
             history=history,
             system_prompt=effective_system_prompt,
+            mode=AgentMode.PLAN if args.plan else AgentMode.DEFAULT,
         )
     finally:
         await app.close()
 
 
-async def _run_interactive(*, app, conversation, history, system_prompt) -> int:
+async def _run_interactive(*, app, conversation, history, system_prompt, mode) -> int:
     """读取输入：命令交给命令处理函数，普通消息交给会话服务。"""
     while True:
         try:
@@ -239,6 +237,15 @@ async def _run_interactive(*, app, conversation, history, system_prompt) -> int:
         if content in {"/exit", "/quit"}:
             print("聊天已结束。")
             return 0
+
+        if content in {"/plan", "/plan on"}:
+            mode = AgentMode.PLAN
+            print("已进入 PLAN MODE：只分析和制定计划，不修改文件或执行命令。")
+            continue
+        if content in {"/plan off", "/execute"}:
+            mode = AgentMode.DEFAULT
+            print("已退出 PLAN MODE：恢复普通执行模式。")
+            continue
 
         handled, conversation, history = await _handle_command(
             content,
@@ -258,6 +265,7 @@ async def _run_interactive(*, app, conversation, history, system_prompt) -> int:
             history=history,
             content=content,
             model=app.model,
+            mode=mode,
         )
 
 
@@ -318,6 +326,19 @@ async def _handle_command(content, *, app, conversation, history, system_prompt)
         await summary_store.delete(conversation.id)
         print("上下文已清空。")
         return True, conversation, history
+    if content == "/compact":
+        decision = await app.conversation_service.compact(
+            conversation_id=conversation.id,
+            context_manager=app.context_manager,
+            tools=tuple(
+                app.tool_registry.definitions_for_mode(AgentMode.DEFAULT)
+            ),
+            provider=app.provider,
+            model=app.model,
+            max_output_tokens=app.max_output_tokens,
+            event_handler=CliEventHandler(),
+        )
+        return True, conversation, history
     if content == "/trace" or content.startswith("/trace "):
         identifier = content.removeprefix("/trace").strip()
         if not identifier:
@@ -352,6 +373,7 @@ async def _send_message(
     history: list[Message],
     content: str,
     model: str,
+    mode: AgentMode,
 ) -> tuple[bool, Conversation]:
 
     try:
@@ -360,6 +382,7 @@ async def _send_message(
             content=content,
             trigger=TriggerContext(source=ConversationSource.MANUAL),
             event_handler=CliEventHandler(),
+            mode=mode,
         )
     except KeyboardInterrupt:
         print("\n[cancel] 已取消当前 Run。")
@@ -437,6 +460,11 @@ def _parse_args() -> argparse.Namespace:
         help="发送一条消息后退出，不进入交互聊天。",
     )
     parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="启动后进入 PLAN MODE，只分析和制定计划，不修改文件或执行命令。",
+    )
+    parser.add_argument(
         "--setup",
         action="store_true",
         help="启动交互式模型设置，密钥优先保存到 macOS Keychain。",
@@ -461,7 +489,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-steps",
         type=int,
-        default=12,
+        default=20,
         help="每条消息最多执行的模型/工具循环步数。",
     )
     parser.add_argument(
@@ -483,10 +511,10 @@ def _parse_args() -> argparse.Namespace:
         help="会话 SQLite 数据库路径。",
     )
     parser.add_argument(
-        "--tasks-dir",
+        "--plans-dir",
         type=Path,
-        default=DEFAULT_TASKS_DIR,
-        help="持久化 Task JSON 文件目录。",
+        default=DEFAULT_PLANS_DIR,
+        help="持久化 Plan JSON 文件目录。",
     )
     # parser.add_argument(
     #     "--mcp-config",

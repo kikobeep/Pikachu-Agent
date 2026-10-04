@@ -49,10 +49,11 @@ from app.skills_improve.distiller import ModelMultiTeacherDistiller, ModelProced
 from app.skills_improve.evidence import DefaultEventSelector, TraceEvidenceBuilder
 from app.skills_improve.miner import ModelPatternMiner
 from app.skills_improve.service import SkillImproveService
-from app.task.attibution import TaskToolOutputAttributionResolver
-from app.task.context import TaskContextProvider
-from app.task.store import PlanStore
-from app.task.tools import register_plan_tools
+from app.plan.attribution import PlanToolOutputAttributionResolver
+from app.plan.context import PlanContextProvider
+from app.plan.store import PlanStore
+from app.plan.tools import register_plan_tools
+from app.plan.runner import PlanRunner
 from app.tools.builtin import builtin_tool_registry
 from app.tools.builtin._workspace import workspace_root_path
 from app.tools.approval import ApprovalGate
@@ -60,7 +61,7 @@ from app.tools.permissions.policy import PermissionPolicyEngine
 from app.tools.permissions.store import PermissionRuleStore
 from app.tools.register import ToolRegistry
 from app.trace.store import TraceStore
-from app.task import DEFAULT_TASKS_DIR
+from app.plan import DEFAULT_PLANS_DIR
 from app.skills.config import SkillSettings
 from app.memory.tools import DEFAULT_ON_DEMAND_MEMORY_TOOL_NAMES
 
@@ -92,7 +93,7 @@ class Application:
         system_prompt: str | None = None,
         agent_md: str | Path | None = None,
         database: str | Path = DEFAULT_DATABASE_PATH,
-        tasks_dir: str | Path = DEFAULT_TASKS_DIR,
+        plans_dir: str | Path = DEFAULT_PLANS_DIR,
         mcp_config: str | Path = None,
         memory_dir: str | Path | None = None,
         skills_user_dir: str | Path | None = None,
@@ -134,7 +135,7 @@ class Application:
         ace_harmful_prune_threshold: int = 3,
     ) -> None:
         self.database = Path(database).expanduser().resolve()
-        self.tasks_dir = Path(tasks_dir).expanduser().resolve()
+        self.plans_dir = Path(plans_dir).expanduser().resolve()
         self.workspace_root = workspace_root_path(workspace_root)
         self.enable_memory_write_tools = enable_memory_write_tools
         self.context_summary_enabled = context_summary_enabled
@@ -295,9 +296,9 @@ class Application:
         register_history_tools(tool_registry, conversation_store)
 
         '''
-        task_store: 计划目标、约束、步骤、进度、关键事实等。通过plan_create、plan_update、plan_get 等工具创建、修改或读取计划
+        plan_store: 计划目标、约束、步骤、进度、关键事实等。通过plan_create、plan_update、plan_get 等工具创建、修改或读取计划
         '''
-        plan_store = PlanStore(self.tasks_dir)
+        plan_store = PlanStore(self.plans_dir)
         await plan_store.initialize()
         register_plan_tools(tool_registry, plan_store)
 
@@ -309,7 +310,7 @@ class Application:
         register_evidence_tools(tool_registry, evidence_store)
         evidence_recorder = EvidenceRecorder(
             evidence_store,
-            attribution_resolver=TaskToolOutputAttributionResolver(plan_store),
+            attribution_resolver=PlanToolOutputAttributionResolver(plan_store),
         )
         '''
         summary_store：滚动摘要，以及摘要覆盖了多少条原始消息
@@ -501,7 +502,8 @@ class Application:
             max_output_tokens=self.max_output_tokens,
             
             context_manager=context_manager,
-            task_context_provider=TaskContextProvider(plan_store),
+            plan_context_provider=PlanContextProvider(plan_store),
+            plan_runner=PlanRunner(plan_store),
             checkpoint_store=checkpoint_store,
             memory_manager=memory_manager,
             memory_auto_search_enabled=self.memory_auto_search_enabled,
@@ -535,7 +537,7 @@ class Application:
             summary_store=summary_store,
         )
 
-        # Skill 自进化管线（CLUSTER → DISTILL → Candidate → 人工审核）。
+      
         skill_candidate_store, skill_improving = await self._build_skill_improving(
             run_store=run_store,
             trace_store=trace_store,
@@ -543,15 +545,7 @@ class Application:
             conversation_store=conversation_store,
         )
 
-        # automation_store = SQLiteAutomationStore(database)
-        # automation_scheduler = AutomationScheduler(
-        #     automation_store,
-        #     conversation_service,
-        # )
-        # register_automation_tools(tool_registry, automation_scheduler)
-        # await automation_scheduler.start()
 
-        # 挂到 self，供 CLI / Server 读取。
         self.conversation_store = conversation_store
         self.summary_store = summary_store
         self.evidence_store = evidence_store
@@ -568,7 +562,6 @@ class Application:
         # self.artifact_service = artifact_service
         self.tool_registry = tool_registry
         self.plan_store = plan_store
-        self.task_store = plan_store  # compatibility alias
         self.memory_manager = memory_manager
         self.skill_store = skill_store
         self.skill_context_provider = skill_context_provider

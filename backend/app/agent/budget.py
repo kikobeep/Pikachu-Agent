@@ -45,7 +45,7 @@ class RunBudgetConfig(BaseSettings):
     # 默认只保留调用次数硬上限；旧配置仍可显式启用 Warning / Finalizing。
     warning_model_calls: int | None = Field(default=None, ge=1)
     finalization_model_calls: int | None = Field(default=None, ge=1)
-    hard_model_calls: int = Field(default=15, ge=1)
+    hard_model_calls: int = Field(default=20, ge=1)
     finalization_max_output_tokens: int = Field(default=1_200, ge=1)
 
     @model_validator(mode="after")

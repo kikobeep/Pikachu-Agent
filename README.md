@@ -1,5 +1,7 @@
 # Pikachu
 
+> [阅读中文版](CHINESE_README.md)
+
 > A local agent runtime for completing, recovering, and learning from software tasks.
 
 Pikachu turns an LLM into a bounded coding agent. It can inspect a workspace, edit files, run verification commands, maintain task state, and continue interrupted work with the context that matters.
@@ -7,6 +9,26 @@ Pikachu turns an LLM into a bounded coding agent. It can inspect a workspace, ed
 ```text
 Understand → Act → Verify → Recover → Learn
 ```
+
+## Demos
+
+These recordings show Pikachu running in the local TUI.
+
+- PLAN MODE and sequential plan execution
+
+<video src="docs/demos/plan_mode.mp4" controls width="960"></video>
+
+[Open the PLAN MODE demo video](docs/demos/plan_mode.mp4)
+
+- Memory
+
+<video src="docs/demos/compact_demo.mp4" controls width="960"></video>
+
+[Open the context compaction demo video](docs/demos/compact_demo.mp4)
+
+- Context compaction and summary
+
+![Pikachu context compaction summary](docs/demos/compact_demo.png)
 
 ## Contents
 

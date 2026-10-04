@@ -35,9 +35,9 @@ class EvidenceSearchTool(BaseTool):
                         "type": "string",
                         "description": "可选，限定原工具名。",
                     },
-                    "task_id": {
+                    "plan_id": {
                         "type": "string",
-                        "description": "可选，限定关联任务 ID。",
+                        "description": "可选，限定关联计划 ID。",
                     },
                     "limit": {
                         "type": "integer",
@@ -69,7 +69,7 @@ class EvidenceSearchTool(BaseTool):
             conversation_id=conversation_id,
             query=query,
             tool_name=_optional_text(arguments.get("tool_name")),
-            task_id=_optional_text(arguments.get("task_id")),
+            plan_id=_optional_text(arguments.get("plan_id")),
             limit=_integer(arguments.get("limit", 10), "limit"),
         )
         return {
@@ -81,8 +81,8 @@ class EvidenceSearchTool(BaseTool):
                     "tool_name": hit.record.tool_name,
                     "run_id": hit.record.run_id,
                     "content_chars": hit.record.content_chars,
-                    "task_id": hit.record.task_id,
-                    "task_step_id": hit.record.task_step_id,
+                    "plan_id": hit.record.plan_id,
+                    "plan_step_id": hit.record.plan_step_id,
                     "created_at": hit.record.created_at.isoformat(),
                     "snippet": hit.snippet,
                 }
@@ -163,8 +163,8 @@ class EvidenceReadTool(BaseTool):
             "evidence_id": document.record.id,
             "tool_name": document.record.tool_name,
             "run_id": document.record.run_id,
-            "task_id": document.record.task_id,
-            "task_step_id": document.record.task_step_id,
+            "plan_id": document.record.plan_id,
+            "plan_step_id": document.record.plan_step_id,
             "sha256": document.record.sha256,
             "content_chars": document.record.content_chars,
             "offset": offset,

@@ -152,18 +152,14 @@ class ToolRoundExecutor:
             '''
             plan_create / plan_update
                 ↓
-            任务存入 Task Store
+            计划存入 Plan Store
                 ↓
-            TaskContextProvider 读取当前会话绑定的活动任务
-                ├─ 渲染任务状态，加入模型上下文
+            PlanContextProvider 读取当前会话绑定的活动计划
+                ├─ 渲染计划状态，加入模型上下文
                 └─ 提取标题、进行中步骤，补充记忆召回 query
             '''
-            if (
-                mode is AgentMode.PLAN
-                and result.success
-                and tool_call.name in ("plan_create", "plan_update")
-            ):
-                plan_created = True
+            if result.success and tool_call.name in ("plan_create", "plan_update"):
+                plan_created = plan_created or tool_call.name == "plan_create"
                 extracted_plan_id = plan_id_from_output(result.output)
                 if extracted_plan_id:
                     plan_id = extracted_plan_id

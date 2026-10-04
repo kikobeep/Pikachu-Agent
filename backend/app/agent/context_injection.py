@@ -10,7 +10,7 @@ from app.memory.manager import MemoryManager
 from app.memory.search_config import MemorySearchInputs, SearchMode,MemorySearchResult
 from app.skills.context import SkillContextProvider
 from app.skills.store import SkillStore
-from app.task.context import TaskContextProvider
+from app.plan.context import PlanContextProvider
 from app.tools.config import ToolResult
 from app.skills.config import Skill
 from app.agent.emitter import EventEmitter
@@ -43,7 +43,7 @@ class ContextRuntime:
         memory_search_query: MemorySearchInputs | None = None,
         skill_context_provider: SkillContextProvider | None,
         skill_store: SkillStore | None,
-        task_context_provider: TaskContextProvider | None
+        plan_context_provider: PlanContextProvider | None
     ):
         # memory
         self._memory_manager = memory_manager
@@ -58,8 +58,8 @@ class ContextRuntime:
         self._skill_loaded = False
         self._active_skills: dict[str, Skill] = {}
 
-        # task
-        self._task_context_provider = task_context_provider
+        # plan
+        self._plan_context_provider = plan_context_provider
 
     @property
     def active_skill_names(self) -> tuple[str, ...]:
@@ -111,9 +111,9 @@ class ContextRuntime:
             messages.append(render_checkpoint_context(recovery_checkpoint))
         
 
-        if self._task_context_provider is not None:
-            task = await self._task_context_provider.load_messages(conversation_id)
-            messages.append(task)
+        if self._plan_context_provider is not None:
+            plan = await self._plan_context_provider.load_messages(conversation_id)
+            messages.append(plan)
 
 
 
@@ -241,13 +241,13 @@ class ContextRuntime:
         conversation_id: str | None,
     ) -> MemorySearchInputs:
 
-        task_title: str | None = None
-        task_steps: tuple[str, ...] = ()
+        plan_title: str | None = None
+        plan_steps: tuple[str, ...] = ()
 
-        if self._task_context_provider is not None:
-            task_title, task_steps = (
-                await self._task_context_provider.task_for_memory(
+        if self._plan_context_provider is not None:
+            plan_title, plan_steps = (
+                await self._plan_context_provider.plan_for_memory(
                     conversation_id
                 )
             ) 
-        return self._memory_search_input.with_task(task_title,task_steps)
+        return self._memory_search_input.with_task(plan_title, plan_steps)

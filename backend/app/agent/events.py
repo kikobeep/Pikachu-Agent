@@ -44,6 +44,7 @@ class AgentEventType(StrEnum):
     SKILL_ACTIVATION_FAILED = "skill_activation_failed"
     CONTEXT_HANDOFF = "context_handoff"
     CONTEXT_COMPACTED = "context_compacted"
+    PLAN_UPDATED = "plan_updated"
     AGENT_COMPLETED = "agent_completed"
     AGENT_FAILED = "agent_failed"
     AGENT_CANCELLED = "agent_cancelled"
@@ -114,6 +115,7 @@ class AgentEvent(BaseModel):
     summary_model: str | None = None
     summary_duration_ms: float | None = Field(default=None, ge=0.0)
     summary_error: str | None = None
+    summary_text: str | None = None
     cache_prefix_reused: bool | None = None
     cache_prefix_message_count: int | None = Field(default=None, ge=0)
     reflection_triggered: bool | None = None
@@ -123,6 +125,11 @@ class AgentEvent(BaseModel):
     reflection_finish_reason: str | None = None
     reflection_error: str | None = None
     reflection_skip_reason: str | None = None
+    plan_id: str | None = None
+    plan_title: str | None = None
+    plan_status: str | None = None
+    plan_revision: int | None = Field(default=None, ge=1)
+    plan_steps: tuple[dict[str, object], ...] = ()
     reflection_memory_id: str | None = None
     reflection_mutation_applied: bool | None = None
     reflection_archive_required: bool | None = None

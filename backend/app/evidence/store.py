@@ -27,17 +27,19 @@ CREATE TABLE IF NOT EXISTS evidence (
     content_chars INTEGER NOT NULL,
     content_bytes INTEGER NOT NULL,
     sha256 TEXT NOT NULL,
-    task_id TEXT,
-    task_step_id TEXT,
+    plan_id TEXT,
+    plan_step_id TEXT,
     created_at TEXT NOT NULL,
     UNIQUE(run_id, tool_call_id)
 );
 
+"""
+_INDEX_SCHEMA = """
 CREATE INDEX IF NOT EXISTS idx_evidence_conversation_created
 ON evidence(conversation_id, created_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_evidence_conversation_task
-ON evidence(conversation_id, task_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_evidence_conversation_plan
+ON evidence(conversation_id, plan_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_evidence_run
 ON evidence(run_id, created_at ASC);
@@ -73,6 +75,8 @@ class EvidenceStore:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         async with self._connect() as database:
             await database.executescript(_SCHEMA)
+            await _migrate_legacy_task_columns(database)
+            await database.executescript(_INDEX_SCHEMA)
             await database.commit()
 
     async def create(
@@ -84,8 +88,8 @@ class EvidenceStore:
         tool_name: str,
         content: str,
         sha256: str,
-        task_id: str | None = None,
-        task_step_id: str | None = None,
+        plan_id: str | None = None,
+        plan_step_id: str | None = None,
     ) -> EvidenceRecord:
         """创建不可变证据；同一 Run/ToolCall 的相同内容幂等返回。"""
 
@@ -135,7 +139,7 @@ class EvidenceStore:
                     INSERT INTO evidence (
                         id, conversation_id, run_id, tool_call_id, tool_name,
                         content_type, content, content_chars, content_bytes, sha256,
-                        task_id, task_step_id, created_at
+                        plan_id, plan_step_id, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
@@ -149,8 +153,8 @@ class EvidenceStore:
                         len(content),
                         content_bytes,
                         sha256,
-                        task_id,
-                        task_step_id,
+                        plan_id,
+                        plan_step_id,
                         created_at.isoformat(),
                     ),
                 )
@@ -167,8 +171,8 @@ class EvidenceStore:
             content_chars=len(content),
             content_bytes=content_bytes,
             sha256=sha256,
-            task_id=task_id,
-            task_step_id=task_step_id,
+            plan_id=plan_id,
+            plan_step_id=plan_step_id,
             created_at=created_at,
         )
 
@@ -210,7 +214,7 @@ class EvidenceStore:
         conversation_id: str,
         query: str,
         tool_name: str | None = None,
-        task_id: str | None = None,
+        plan_id: str | None = None,
         limit: int = 10,
     ) -> tuple[EvidenceSearchHit, ...]:
         """在当前会话内检索原始输出，返回有界片段而非整份内容。"""
@@ -228,9 +232,9 @@ class EvidenceStore:
         if tool_name:
             filters.append("tool_name = ?")
             parameters.append(tool_name.strip())
-        if task_id:
-            filters.append("task_id = ?")
-            parameters.append(task_id.strip())
+        if plan_id:
+            filters.append("plan_id = ?")
+            parameters.append(plan_id.strip())
         parameters.append(limit)
         async with self._connect() as database:
             cursor = await database.execute(
@@ -267,23 +271,23 @@ class EvidenceStore:
             rows = await cursor.fetchall()
         return tuple(_record_from_row(row) for row in rows)
 
-    async def list_for_task(
+    async def list_for_plan(
         self,
         *,
         conversation_id: str,
-        task_id: str,
+        plan_id: str,
         limit: int = 20,
     ) -> tuple[EvidenceRecord, ...]:
         async with self._connect() as database:
             cursor = await database.execute(
                 """
                 SELECT * FROM evidence
-                WHERE conversation_id = ? AND task_id = ?
+                WHERE conversation_id = ? AND plan_id = ?
                 ORDER BY created_at DESC LIMIT ?
                 """,
                 (
                     _required(conversation_id, "conversation_id"),
-                    _required(task_id, "task_id"),
+                    _required(plan_id, "plan_id"),
                     limit,
                 ),
             )
@@ -311,10 +315,26 @@ def _record_from_row(row: aiosqlite.Row) -> EvidenceRecord:
         content_chars=row["content_chars"],
         content_bytes=row["content_bytes"],
         sha256=row["sha256"],
-        task_id=row["task_id"],
-        task_step_id=row["task_step_id"],
+        plan_id=row["plan_id"],
+        plan_step_id=row["plan_step_id"],
         created_at=datetime.fromisoformat(row["created_at"]),
     )
+
+
+async def _migrate_legacy_task_columns(database: aiosqlite.Connection) -> None:
+    """把早期 evidence 表中的任务归因列改名为计划归因列。"""
+
+    cursor = await database.execute("PRAGMA table_info(evidence)")
+    columns = {row[1] for row in await cursor.fetchall()}
+    if "plan_id" not in columns and "task_id" in columns:
+        await database.execute(
+            "ALTER TABLE evidence RENAME COLUMN task_id TO plan_id"
+        )
+    if "plan_step_id" not in columns and "task_step_id" in columns:
+        await database.execute(
+            "ALTER TABLE evidence RENAME COLUMN task_step_id TO plan_step_id"
+        )
+    await database.execute("DROP INDEX IF EXISTS idx_evidence_conversation_task")
 
 
 def _snippet(content: str, query: str, *, radius: int = 180) -> str:

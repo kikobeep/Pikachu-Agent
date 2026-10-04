@@ -393,7 +393,7 @@ async def _build_app(
         provider=ModelProvider(args.provider),
         model=args.model,
         database=args.database,
-        tasks_dir=args.tasks_dir,
+        plans_dir=args.plans_dir,
         workspace_root=workspace,
         # 盲测：只放行 workspace 内的 shell 自测命令，网络类工具仍走默认拒绝。
         # approval_gate=AutoApproveGate(approve_tool_names=()),
@@ -716,8 +716,8 @@ def parse_args() -> argparse.Namespace:
         help="数据库路径；不指定则按 language 自动生成 polyglot-{language}.db",
     )
     parser.add_argument(
-        "--tasks-dir",
-        default=str(BACKEND / f"tasks-{Path(tempfile.gettempdir()).name}"),
+        "--plans-dir",
+        default=str(BACKEND / f"plans-{Path(tempfile.gettempdir()).name}"),
     )
     parser.add_argument("--report", default=None)
     parser.add_argument(

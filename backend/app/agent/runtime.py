@@ -25,7 +25,8 @@ from app.model.config import ModelProvider
 from app.model.registry import ModelAdapterRegistry
 from app.skills.context import SkillContextProvider
 from app.skills.store import SkillStore
-from app.task.context import TaskContextProvider
+from app.plan.context import PlanContextProvider
+from app.plan.runner import PlanRunner
 from app.tools.approval import ApprovalGate
 from app.tools.executor import ToolExecutor
 from app.tools.hooks import ToolHook
@@ -56,7 +57,8 @@ class AgentRuntime:
         policy_engine: PermissionPolicyEngine | None = None,
         rule_store: PermissionRuleStore | None = None,
         context_manager: ContextManager | None = None,
-        task_context_provider: TaskContextProvider | None = None,
+        plan_context_provider: PlanContextProvider | None = None,
+        plan_runner: PlanRunner | None = None,
         checkpoint_store: CheckpointStore | None = None,
         memory_manager: MemoryManager | None = None,
         memory_reflector: MemoryReflector | None = None,
@@ -120,7 +122,8 @@ class AgentRuntime:
             max_tool_rounds=max_tool_rounds,
             max_output_tokens=max_output_tokens,
             context_manager=self._context_manager,
-            task_context_provider=task_context_provider,
+            plan_context_provider=plan_context_provider,
+            plan_runner=plan_runner,
             checkpoint_store=checkpoint_store,
             memory_manager=memory_manager,
             memory_auto_search_enabled=memory_auto_search_enabled,

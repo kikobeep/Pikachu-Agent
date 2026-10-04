@@ -8,4 +8,5 @@ __pycache__/
 .ruff_cache/
 pikachu.egg-info/
 conversation.db
+.DS_Store
 

@@ -1,6 +1,6 @@
-"""任务领域的核心数据结构。
+"""计划领域的核心数据结构。
 
-Task 是任务事实的权威源，独立于会话消息持久化。长任务的目标、约束、
+Plan 是计划事实的权威源，独立于会话消息持久化。长期计划的目标、约束、
 进度、待办与关键事实保存在这里，不会因为对话压缩（工具结果缩短、
 旧工具轮移除、滚动摘要）而丢失。
 """
@@ -21,8 +21,8 @@ from pydantic import (
     model_validator,
 )
 
-TASK_ID_LENGTH = 32
-_TASK_ID_RE = re.compile(rf"^[0-9a-f]{{{TASK_ID_LENGTH}}}$")
+PLAN_ID_LENGTH = 32
+_PLAN_ID_RE = re.compile(rf"^[0-9a-f]{{{PLAN_ID_LENGTH}}}$")
 _MAX_TITLE_CHARS = 500
 _MAX_TEXT_CHARS = 4_000
 _MAX_ENTRY_CHARS = 2_000
@@ -30,8 +30,8 @@ _MAX_ENTRIES = 100
 _MAX_STEPS = 100
 
 
-class TaskStatus(StrEnum):
-    """任务生命周期状态。"""
+class PlanStatus(StrEnum):
+    """计划生命周期状态。"""
 
     PENDING = "pending"
     ACTIVE = "active"
@@ -41,8 +41,8 @@ class TaskStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
-class TaskPriority(StrEnum):
-    """任务优先级。"""
+class PlanPriority(StrEnum):
+    """计划优先级。"""
 
     LOW = "low"
     NORMAL = "normal"
@@ -50,8 +50,8 @@ class TaskPriority(StrEnum):
     URGENT = "urgent"
 
 
-class TaskStepStatus(StrEnum):
-    """任务步骤状态。"""
+class PlanStepStatus(StrEnum):
+    """计划步骤状态。"""
 
     TODO = "todo"
     IN_PROGRESS = "in_progress"
@@ -59,14 +59,14 @@ class TaskStepStatus(StrEnum):
     BLOCKED = "blocked"
 
 
-class TaskStep(BaseModel):
-    """任务中的一个可追踪步骤。"""
+class PlanStep(BaseModel):
+    """计划中的一个可追踪步骤。"""
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
     title: str
-    status: TaskStepStatus = TaskStepStatus.TODO
+    status: PlanStepStatus = PlanStepStatus.TODO
     note: str | None = None
 
     @field_validator("id", "title", mode="before")
@@ -79,13 +79,13 @@ class TaskStep(BaseModel):
         """步骤 ID 和标题必须是规范化后的非空文本。"""
 
         if not isinstance(value, str):
-            raise TypeError("task step id and title must be strings")
+            raise TypeError("plan step id and title must be strings")
         normalized = _normalize_text(value)
         if not normalized:
-            raise ValueError("task step id and title cannot be empty")
+            raise ValueError("plan step id and title cannot be empty")
         maximum = 128 if info.field_name == "id" else _MAX_TITLE_CHARS
         if len(normalized) > maximum:
-            raise ValueError("task step id or title is too long")
+            raise ValueError("plan step id or title is too long")
         return normalized
 
     @field_validator("note", mode="before")
@@ -95,23 +95,23 @@ class TaskStep(BaseModel):
 
         normalized = _normalize_optional_text(value)
         if normalized is not None and len(normalized) > _MAX_TEXT_CHARS:
-            raise ValueError("task step note is too long")
+            raise ValueError("plan step note is too long")
         return normalized
 
     @model_validator(mode="after")
-    def validate_status_note(self) -> TaskStep:
+    def validate_status_note(self) -> PlanStep:
         """完成与阻塞步骤必须记录可恢复的依据。"""
 
-        if self.status in {TaskStepStatus.DONE, TaskStepStatus.BLOCKED}:
+        if self.status in {PlanStepStatus.DONE, PlanStepStatus.BLOCKED}:
             if not self.note:
                 raise ValueError(
-                    f"task step with status {self.status.value} requires a note"
+                    f"plan step with status {self.status.value} requires a note"
                 )
         return self
 
 
-class Task(BaseModel):
-    """一个可恢复、可查询的长任务。"""
+class Plan(BaseModel):
+    """一个可恢复、可查询的长期计划。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -119,12 +119,12 @@ class Task(BaseModel):
     title: str
     description: str | None = None
     goal: str | None = None
-    status: TaskStatus = TaskStatus.PENDING
-    priority: TaskPriority = TaskPriority.NORMAL
+    status: PlanStatus = PlanStatus.PENDING
+    priority: PlanPriority = PlanPriority.NORMAL
     constraints: tuple[str, ...] = ()
     state: tuple[str, ...] = ()
     key_facts: tuple[str, ...] = ()
-    steps: tuple[TaskStep, ...] = ()
+    steps: tuple[PlanStep, ...] = ()
     owner_conversation_id: str = Field(min_length=1, frozen=True)
     run_ids: tuple[str, ...] = ()
     created_at: datetime
@@ -148,7 +148,7 @@ class Task(BaseModel):
         normalized = _normalize_text(value)
         maximum = _MAX_TITLE_CHARS if info.field_name == "title" else _MAX_TEXT_CHARS
         if len(normalized) > maximum:
-            raise ValueError(f"task {info.field_name} is too long")
+            raise ValueError(f"plan {info.field_name} is too long")
         return normalized or None
 
     @field_validator(
@@ -167,17 +167,17 @@ class Task(BaseModel):
     @classmethod
     def title_required(cls, value: str | None) -> str:
         if not value:
-            raise ValueError("task title cannot be empty")
+            raise ValueError("plan title cannot be empty")
         return value
 
     @field_validator("id", mode="before")
     @classmethod
     def id_required(cls, value: object) -> str:
         if not isinstance(value, str):
-            raise TypeError("task id must be a string")
+            raise TypeError("plan id must be a string")
         normalized = value.strip().lower()
-        if not _TASK_ID_RE.fullmatch(normalized):
-            raise ValueError("task id must be a 32-character hexadecimal string")
+        if not _PLAN_ID_RE.fullmatch(normalized):
+            raise ValueError("plan id must be a 32-character hexadecimal string")
         return normalized
 
     @field_validator("owner_conversation_id", mode="before")
@@ -187,7 +187,7 @@ class Task(BaseModel):
 
         normalized = _normalize_optional_text(value)
         if normalized is None:
-            raise ValueError("task owner_conversation_id cannot be empty")
+            raise ValueError("plan owner_conversation_id cannot be empty")
         return normalized
 
     @field_validator("created_at", "updated_at", "completed_at")
@@ -198,33 +198,33 @@ class Task(BaseModel):
         if value is None:
             return None
         if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError("task datetimes must include timezone information")
+            raise ValueError("plan datetimes must include timezone information")
         return value.astimezone(UTC)
 
     @model_validator(mode="after")
-    def validate_invariants(self) -> Task:
-        """验证步骤、任务状态与时间顺序。"""
+    def validate_invariants(self) -> Plan:
+        """验证步骤、计划状态与时间顺序。"""
 
         step_ids = [step.id for step in self.steps]
         if len(step_ids) != len(set(step_ids)):
-            raise ValueError("task step ids must be unique")
+            raise ValueError("plan step ids must be unique")
         if len(self.steps) > _MAX_STEPS:
-            raise ValueError(f"task cannot contain more than {_MAX_STEPS} steps")
+            raise ValueError(f"plan cannot contain more than {_MAX_STEPS} steps")
         in_progress_count = sum(
-            step.status is TaskStepStatus.IN_PROGRESS for step in self.steps
+            step.status is PlanStepStatus.IN_PROGRESS for step in self.steps
         )
         if in_progress_count > 1:
-            raise ValueError("task can contain at most one in_progress step")
-        if self.status is TaskStatus.PAUSED and in_progress_count:
-            raise ValueError("paused task cannot contain an in_progress step")
-        if self.status is TaskStatus.COMPLETED and self.steps:
-            if any(step.status is not TaskStepStatus.DONE for step in self.steps):
-                raise ValueError("completed task requires all steps to be done")
+            raise ValueError("plan can contain at most one in_progress step")
+        if self.status is PlanStatus.PAUSED and in_progress_count:
+            raise ValueError("paused plan cannot contain an in_progress step")
+        if self.status is PlanStatus.COMPLETED and self.steps:
+            if any(step.status is not PlanStepStatus.DONE for step in self.steps):
+                raise ValueError("completed plan requires all steps to be done")
         for field_name in ("constraints", "state", "key_facts"):
             if len(getattr(self, field_name)) > _MAX_ENTRIES:
-                raise ValueError(
-                    f"task {field_name} cannot contain more than {_MAX_ENTRIES} entries"
-                )
+                    raise ValueError(
+                        f"plan {field_name} cannot contain more than {_MAX_ENTRIES} entries"
+                    )
         if self.updated_at < self.created_at:
             raise ValueError("updated_at cannot be earlier than created_at")
         if self.completed_at is not None:
@@ -237,26 +237,25 @@ class Task(BaseModel):
         """渲染一行的进度摘要，用于列表与日志。"""
 
         total = len(self.steps)
-        done = sum(1 for step in self.steps if step.status is TaskStepStatus.DONE)
+        done = sum(1 for step in self.steps if step.status is PlanStepStatus.DONE)
         status_text = self.status.value
         if total:
             return f"[{status_text}] {self.title} ({done}/{total} 步骤完成)"
         return f"[{status_text}] {self.title}"
 
 
-class TaskPatch(BaseModel):
-    """一次任务更新的完整变更集，用于原子校验和写入。"""
+class PlanPatch(BaseModel):
+    """一次计划更新的完整变更集，用于原子校验和写入。"""
 
     model_config = ConfigDict(extra="forbid")
 
     goal: str | None = None
-    status: TaskStatus | None = None
+    status: PlanStatus | None = None
     state: tuple[str, ...] | None = None
     add_constraints: tuple[str, ...] = ()
     add_key_facts: tuple[str, ...] = ()
-    replace_steps: tuple[TaskStep, ...] | None = None
     step_id: str | None = None
-    step_status: TaskStepStatus | None = None
+    step_status: PlanStepStatus | None = None
     step_note: str | None = None
     run_id: str | None = None
     expected_revision: int | None = Field(default=None, ge=1)
@@ -285,15 +284,11 @@ class TaskPatch(BaseModel):
         return _normalize_entries(value)
 
     @model_validator(mode="after")
-    def validate_step_update(self) -> TaskPatch:
+    def validate_step_update(self) -> PlanPatch:
         if (self.step_id is None) != (self.step_status is None):
             raise ValueError("step_id and step_status must be provided together")
         if self.step_note is not None and self.step_id is None:
             raise ValueError("step_note requires step_id and step_status")
-        if "replace_steps" in self.model_fields_set and self.step_id is not None:
-            raise ValueError(
-                "replace_steps cannot be combined with a single step update"
-            )
         return self
 
     @property
@@ -301,7 +296,7 @@ class TaskPatch(BaseModel):
         """是否包含 revision 以外的实际更新。"""
 
         explicit_nullable = bool(
-            {"goal", "state", "replace_steps"} & self.model_fields_set
+            {"goal", "state"} & self.model_fields_set
         )
         return explicit_nullable or any(
             (
@@ -335,10 +330,10 @@ def _normalize_entries(value: object) -> tuple[str, ...]:
     seen: set[str] = set()
     for entry in values:
         if not isinstance(entry, str):
-            raise TypeError("task entries must be strings")
+            raise TypeError("plan entries must be strings")
         text = _normalize_text(entry)
         if len(text) > _MAX_ENTRY_CHARS:
-            raise ValueError("task entry is too long")
+            raise ValueError("plan entry is too long")
         if text and text not in seen:
             normalized.append(text)
             seen.add(text)
@@ -346,11 +341,11 @@ def _normalize_entries(value: object) -> tuple[str, ...]:
 
 
 __all__ = [
-    "Task",
-    "TASK_ID_LENGTH",
-    "TaskPriority",
-    "TaskPatch",
-    "TaskStatus",
-    "TaskStep",
-    "TaskStepStatus",
+    "Plan",
+    "PLAN_ID_LENGTH",
+    "PlanPriority",
+    "PlanPatch",
+    "PlanStatus",
+    "PlanStep",
+    "PlanStepStatus",
 ]

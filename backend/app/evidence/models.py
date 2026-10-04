@@ -21,8 +21,8 @@ class EvidenceRecord(BaseModel):
     content_chars: int = Field(ge=0)
     content_bytes: int = Field(ge=0)
     sha256: str
-    task_id: str | None = None
-    task_step_id: str | None = None
+    plan_id: str | None = None
+    plan_step_id: str | None = None
     created_at: datetime
 
 

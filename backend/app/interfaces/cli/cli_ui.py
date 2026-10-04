@@ -8,6 +8,7 @@ import os
 import shutil
 import sys
 import tempfile
+import unicodedata
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from time import perf_counter
@@ -33,6 +34,33 @@ _PROVIDER_LABELS = {
 }
 
 
+def _terminal_display_width(text: str) -> int:
+    """Return the number of terminal columns occupied by plain text."""
+    width = 0
+    for character in text:
+        if unicodedata.combining(character):
+            continue
+        width += 2 if unicodedata.east_asian_width(character) in {"W", "F"} else 1
+    return width
+
+
+def _fit_terminal_text(text: str, width: int) -> str:
+    """Truncate text by terminal columns without splitting a wide character."""
+    if width <= 0:
+        return ""
+    result: list[str] = []
+    used = 0
+    for character in text:
+        character_width = 0 if unicodedata.combining(character) else (
+            2 if unicodedata.east_asian_width(character) in {"W", "F"} else 1
+        )
+        if used + character_width > width:
+            break
+        result.append(character)
+        used += character_width
+    return "".join(result)
+
+
 def print_banner(
     *,
     output_fn: Callable[[str], Any] = print,
@@ -50,25 +78,25 @@ def print_banner(
     right_width = max(32, inner_width - left_width - 7)
 
     def cell(text: str, width: int, code: str) -> str:
-        # Pad before adding ANSI escapes so terminal alignment stays exact.
-        return style(text[:width].ljust(width), code)
+        # Python len() counts code points, not terminal columns.  This matters
+        # for symbols such as ⚡ and CJK text; fit first, then add ANSI color.
+        fitted = _fit_terminal_text(text, width)
+        padding = max(0, width - _terminal_display_width(fitted))
+        return style(fitted + (" " * padding), code)
 
     left = [
         ("Welcome back!", "1;38;5;255"),
         ("", "38;5;245"),
-        ("          .-\"\"-.       ", "38;5;33"),
-        ("       .-'  .--. '-.    ", "38;5;33"),
-        ("     .'   .'    '.   '.  ", "38;5;33"),
-        ("    /    /  @  @  \\    \\ ", "38;5;33"),
-        ("   ;    |    ^     |    ;", "38;5;33"),
-        ("   |     \\  ---  /     |", "38;5;33"),
-        ("    \\     '.___.'     / ", "38;5;33"),
-        ("     '._           _.'  ", "38;5;33"),
-        ("        '---.___.---'   ", "38;5;33"),
         ("", "38;5;245"),
-        ("Memory-aware assistant", "38;5;248"),
-        ("    + tools + reflection", "38;5;245"),
+        ("                         · · ·", "38;5;33"),
+        ("         ┌───────────────┐", "38;5;33"),
+        ("         │     •  •      │╭", "38;5;33"),
+        ("         │               ││", "38;5;33"),
+        ("         │       ─       │╯", "38;5;33"),
+        ("         └───────────────┘", "38;5;33"),
+        ("               │   │", "38;5;33"),
     ]
+
     right: list[tuple[str, str]] = [("⚡ PIKA STATUS", "1;38;5;216")]
     if status:
         right.extend(
@@ -85,6 +113,7 @@ def print_banner(
     right.extend([
         ("", "38;5;245"),
         ("Tips for getting started", "1;38;5;216"),
+        ("/plan       enter planning mode", "38;5;117"),
         ("/help       list commands", "38;5;117"),
         ("/new        start a fresh conversation", "38;5;117"),
         ("/memories   inspect long-term memory", "38;5;117"),
@@ -97,7 +126,7 @@ def print_banner(
         "",
         style(
             "╭"
-            + ("─ Pikachu CLI · local agent workspace"[: inner_width - 2]).ljust(
+            + _fit_terminal_text("─ Pikachu CLI · local agent workspace", inner_width - 2).ljust(
                 inner_width - 2, "─"
             )
             + "╮",
@@ -149,7 +178,7 @@ def print_startup_status(
     for notice in notices:
         print(f"{style('  提醒：', '38;5;214')}{notice}")
     print(
-        f"\n{style('  输入任务开始工作 · /help 查看命令 · /new 新建会话 · /exit 退出', '38;5;245')}"
+        f"\n{style('  输入任务开始工作 · /plan 规划模式 · /help 查看命令 · /new 新建会话 · /exit 退出', '38;5;245')}"
     )
 
 
@@ -473,7 +502,48 @@ def print_agent_event(event: AgentEvent) -> None:
     elif event.type == "context_handoff":
         _print_event_block("context · handoff", ["正在切换上下文并保留运行状态"], color="38;5;183", title_color="38;5;183")
     elif event.type == "context_compacted":
-        _print_event_block("context · compacted", [f"压缩阶段：{event.compaction_stage or 'unknown'}"], color="38;5;183", title_color="38;5;183")
+        color = "38;5;203" if event.summary_error else "38;5;183"
+        if event.summary_error:
+            lines = [f"压缩失败：{event.summary_error}"]
+        else:
+            lines = [
+                f"压缩阶段：{event.compaction_stage or 'unknown'}",
+                f"摘要覆盖：{event.summarized_conversation_blocks or 0} 个对话块",
+                f"截短工具结果：{event.compacted_tool_results or 0} 条",
+                f"移除旧工具轮次：{event.removed_tool_rounds or 0} 个",
+            ]
+            if event.summary_updated and event.summary_text:
+                lines.extend(["", "摘要：", *event.summary_text.splitlines()])
+            elif not any(
+                (
+                    event.summary_updated,
+                    event.compacted_tool_results,
+                    event.removed_tool_rounds,
+                )
+            ):
+                lines.append("当前没有可压缩的旧对话，或摘要没有发生变化。")
+        _print_event_block(
+            "context · compacted",
+            lines,
+            color=color,
+            title_color=color,
+        )
+    elif event.type == "plan_updated":
+        lines = []
+        for item in event.plan_steps:
+            status = str(item.get("status") or "todo")
+            marker = {
+                "done": "✓",
+                "in_progress": "→",
+                "blocked": "!",
+            }.get(status, " ")
+            lines.append(f"[{marker}] {item.get('title', item.get('id', ''))}")
+        _print_event_block(
+            "plan · todo",
+            lines or ["暂无步骤"],
+            color="38;5;117",
+            title_color="38;5;117",
+        )
     elif event.type == "agent_completed":
         _print_event_block("assistant · completed", ["当前 Run 执行完成"], color="38;5;114", title_color="38;5;114")
     elif event.type == "agent_failed":
@@ -612,6 +682,9 @@ def print_help() -> None:
         "  /checkpoints      查看当前会话的检查点\n"
         "  /trace <Run ID>   查看运行事件\n"
         "  /clear            清空当前会话消息和摘要\n"
+        "  /compact          手动压缩上下文，保留近期对话\n"
+        "  /plan             进入 PLAN MODE（只规划，不修改文件）\n"
+        "  /plan off         退出 PLAN MODE，恢复普通执行\n"
         "  /help             显示帮助\n"
         "  /exit 或 /quit    退出聊天"
     )

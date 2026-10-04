@@ -15,12 +15,15 @@ from app.agent.events import (
     AgentEventType,
     MultiEventHandlers,
 )
+from app.agent.emitter import EventEmitter
 from app.agent.result import AgentError, AgentResult, AgentStopReason
 from app.context.summary_store import ConversationSummaryStore
+from app.context.manager import ContextDecision, ContextManager
 from app.conversation.store import ConversationStore
 from app.run.config import Run, RunStatus
 from app.run.manager import RunManager
 from app.trace.store import TraceStore, TraceEventHandler
+from app.tools.config import ToolDefinition
 
 
 
@@ -108,6 +111,74 @@ class ConversationService:
                 on_run_started=on_run_started,
                 mode=mode,
             )
+
+    async def compact(
+        self,
+        *,
+        conversation_id: str,
+        context_manager: ContextManager,
+        tools: tuple[ToolDefinition, ...] = (),
+        provider: str | None = None,
+        model: str | None = None,
+        max_output_tokens: int | None = None,
+        event_handler: AgentEventHandler | None = None,
+    ) -> ContextDecision:
+        """手动压缩会话上下文，但不创建 Run 或追加聊天消息。"""
+
+        async with self._lock(conversation_id):
+            history = tuple(
+                await self._conversation_store.load_messages(conversation_id)
+            )
+            summary_state = (
+                await self._summary_store.load(conversation_id)
+                if self._summary_store is not None
+                else None
+            )
+            decision = await context_manager.prepare(
+                history,
+                tools=tools,
+                model=model,
+                provider=provider,
+                max_output_tokens=max_output_tokens,
+                history_count=len(history),
+                summary_state=summary_state,
+                force_compaction=True,
+            )
+            if (
+                self._summary_store is not None
+                and decision.summary_state is not None
+                and decision.summary_state != summary_state
+            ):
+                await self._summary_store.save(
+                    conversation_id,
+                    decision.summary_state,
+                )
+            if event_handler is not None:
+                summary_text = None
+                if decision.summary_state is not None:
+                    summary_text = decision.summary_state.summary.render_markdown()
+                emitter = EventEmitter(
+                    handler=event_handler,
+                    run_id=f"compact-{conversation_id[:24]}",
+                    conversation_id=conversation_id,
+                )
+                await emitter.emit(
+                    AgentEventType.CONTEXT_COMPACTED,
+                    compaction_stage=decision.compaction_stage.value,
+                    compacted_tool_results=decision.compacted_tool_results,
+                    removed_tool_rounds=decision.removed_tool_rounds,
+                    reached_target=decision.reached_target,
+                    needs_next_compaction_stage=decision.needs_next_compaction_stage,
+                    summary_updated=decision.summary_updated,
+                    summarized_conversation_blocks=decision.summarized_conversation_blocks,
+                    summary_usage=decision.summary_usage,
+                    summary_provider=decision.summary_provider,
+                    summary_model=decision.summary_model,
+                    summary_duration_ms=decision.summary_duration_ms,
+                    summary_error=decision.summary_error,
+                    summary_text=summary_text,
+                )
+            return decision
     
     async def _dispatch_locked(
         self,
