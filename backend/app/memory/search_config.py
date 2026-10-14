@@ -33,6 +33,11 @@ class MemorySearchCandidate:
     matched_by_text: bool
     vector_rank: int | None = None
     text_rank: int | None = None
+    # 重排阶段填充的三个信号及最终分数；索引层只负责提供原始召回候选。
+    relevance_score: float = 0.0
+    retention_score: float = 0.0
+    importance_score: float = 0.0
+    rerank_score: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +93,10 @@ class MemorySearchConfig:
         max_chunks_per_memory: int = 16,
         candidate_multiplier: int = 8,
         min_vector_similarity: float = 0.12,
+        relevance_weight: float = 0.65,
+        retention_weight: float = 0.20,
+        importance_weight: float = 0.15,
+        retention_strength_days: float = 7.0,
         snippet_chars: int = 360,
         recall_message_max_chars: int = 2_400,
         query_max_chars: int = 1_600,
@@ -100,6 +109,13 @@ class MemorySearchConfig:
             raise ValueError("chunk overlap must be within [0, chunk_chars)")
         if not 0.0 <= min_vector_similarity < 1.0:
             raise ValueError("min_vector_similarity must be within [0, 1)")
+        weights = (relevance_weight, retention_weight, importance_weight)
+        if any(weight < 0.0 for weight in weights) or sum(weights) <= 0.0:
+            raise ValueError("memory rerank weights must be non-negative")
+        if relevance_weight <= max(retention_weight, importance_weight):
+            raise ValueError("relevance_weight must be the highest rerank weight")
+        if retention_strength_days <= 0.0:
+            raise ValueError("retention_strength_days must be positive")
         self.top_k = top_k
         self.vector_top_k = vector_top_k
         self.text_top_k = text_top_k
@@ -111,6 +127,10 @@ class MemorySearchConfig:
         # 过滤向量路径的弱命中：无关文本之间的余弦并非零（哈希碰撞或真实
         # Embedding 的普遍正值），低于该阈值不参与融合。
         self.min_vector_similarity = min_vector_similarity
+        self.relevance_weight = relevance_weight
+        self.retention_weight = retention_weight
+        self.importance_weight = importance_weight
+        self.retention_strength_days = retention_strength_days
         self.snippet_chars = snippet_chars
         self.recall_message_max_chars = recall_message_max_chars
         self.query_max_chars = query_max_chars

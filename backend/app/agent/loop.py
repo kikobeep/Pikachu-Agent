@@ -8,6 +8,7 @@ from pathlib import Path
 from dataclasses import replace
 
 from app.agent.budget import RunBudget, RunBudgetStatus, chargeable_tokens
+from app.agent.cache_layout import build_cache_layout
 from app.model.config import AgentMode, Message, MessageRole
 from app.agent.context_injection import ContextRuntime
 from app.agent.emitter import EventEmitter
@@ -26,7 +27,7 @@ from app.checkpoint.store import CheckpointStore
 from app.context.handoff import HandoffSnapshot, collect_git_snapshot
 from app.context.handoff_store import HandoffStore
 from app.context.manager import ContextManager
-from app.context.summary import ConversationSummaryState
+from app.context.summary import SUMMARY_MESSAGE_NAME, ConversationSummaryState
 from app.context.task_boundary import (
     TaskBoundaryTrigger,
     basis_message_id,
@@ -90,6 +91,60 @@ _TOOL_ROUND_LIMIT_FALLBACK_MESSAGE = (
     "仍保留在本轮记录中，但模型未能在无工具模式下生成可靠总结；如需继续，"
     "请基于当前结果提出下一步要求。"
 )
+
+
+def _reorder_context_layers(
+    messages: Sequence[Message],
+    *,
+    stable_context_messages: Sequence[Message],
+    volatile_context_messages: Sequence[Message],
+    plan_context_messages: Sequence[Message],
+) -> tuple[Message, ...]:
+    """把稳定上下文放到摘要前，把动态上下文收拢到请求尾部。"""
+
+    moved_ids = {
+        id(message)
+        for message in (
+            *stable_context_messages,
+            *volatile_context_messages,
+            *plan_context_messages,
+        )
+    }
+    stable_context_values = tuple(stable_context_messages)
+    dynamic_names = {"PLAN CONTEXT", "plan_mode"}
+    remaining = [
+        message
+        for message in messages
+        if id(message) not in moved_ids
+        and message not in stable_context_values
+        and message.name not in dynamic_names
+        and message.content != _RUN_BUDGET_WARNING_MESSAGE
+    ]
+    summary_index = next(
+        (
+            index
+            for index, message in enumerate(remaining)
+            if message.name == SUMMARY_MESSAGE_NAME
+        ),
+        None,
+    )
+    if summary_index is None:
+        insert_index = 0
+        while (
+            insert_index < len(remaining)
+            and remaining[insert_index].role is MessageRole.SYSTEM
+        ):
+            insert_index += 1
+    else:
+        insert_index = summary_index
+
+    return (
+        *remaining[:insert_index],
+        *stable_context_messages,
+        *remaining[insert_index:],
+        *volatile_context_messages,
+        *plan_context_messages,
+    )
 
 class AgentLoop:
     def __init__(
@@ -559,6 +614,22 @@ class AgentLoop:
                     for message in context_messages
                     if message.name == "PLAN CONTEXT"
                 )
+                volatile_context_messages = tuple(
+                    message
+                    for message in context_messages
+                    if message.name == "plan_mode"
+                    or message.content == _RUN_BUDGET_WARNING_MESSAGE
+                )
+                plan_context_ids = {id(message) for message in plan_context_messages}
+                volatile_context_ids = {
+                    id(message) for message in volatile_context_messages
+                }
+                stable_context_messages = tuple(
+                    message
+                    for message in context_messages
+                    if id(message) not in plan_context_ids
+                    and id(message) not in volatile_context_ids
+                )
                 other_context_messages = tuple(
                     message
                     for message in context_messages
@@ -611,6 +682,11 @@ class AgentLoop:
                 )
 
             # 上下文检查，看能否复用，cache数量
+            previous_cache_layout = (
+                request_prefix_state.cache_layout
+                if request_prefix_state is not None
+                else None
+            )
             continuation_messages = (
                 request_prefix_state.extend(
                     source_messages=source_messages,
@@ -737,6 +813,12 @@ class AgentLoop:
                 context_decision.summary_usage
             )
             request_messages = context_decision.messages
+            request_messages = _reorder_context_layers(
+                request_messages,
+                stable_context_messages=stable_context_messages,
+                volatile_context_messages=volatile_context_messages,
+                plan_context_messages=plan_context_messages,
+            )
             request_tools = context_decision.tools
 
             # 计算summary后的预算
@@ -846,6 +928,12 @@ class AgentLoop:
                 cache_prefix_reused = False
                 cache_prefix_message_count = 0
 
+            cache_layout = build_cache_layout(
+                request_messages,
+                request_tools,
+                previous=previous_cache_layout,
+            )
+
             
             # 保存本轮准备发送的请求，供下一次循环尝试复用消息前缀
             if not must_answer_now and not warning_appended_after_prepare:
@@ -854,6 +942,7 @@ class AgentLoop:
                     context_messages=context_messages,
                     tools=request_tools,
                     sent_messages=request_messages,
+                    cache_layout=cache_layout,
                 )
             else:
                 request_prefix_state = None
@@ -908,6 +997,9 @@ class AgentLoop:
                 model=response.model,
                 message=assistant_message,
                 usage=response.usage,
+                cache_prefix_reused=cache_prefix_reused,
+                cache_prefix_message_count=cache_prefix_message_count,
+                **cache_layout.event_fields(),
             )
 
             tool_calls_in_message = assistant_message.tool_calls

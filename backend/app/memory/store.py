@@ -57,6 +57,7 @@ class MemoryStore:
         summary: str | None = None,
         content: str,
         reason: str,
+        importance: float | None = None,
         expected_revision: int | None = None,
     ) -> RegularMemoryRecord:
         record = await self.load(memory_id)
@@ -75,6 +76,9 @@ class MemoryStore:
             "title": title if title is not None else record.title,
             "summary": summary if summary is not None else record.summary,
             "content": content,
+            "importance": (
+                record.importance if importance is None else importance
+            ),
             "last_update_reason": reason,
             "updated_at": datetime.now(UTC),
             "revision": record.revision + 1,
@@ -164,6 +168,7 @@ class MemoryStore:
         title: str,
         summary: str,
         content: str,
+        importance: float = 0.5,
     ) -> RegularMemoryRecord:
         existing_ids = await self._list_ids()
         now = datetime.now(UTC)
@@ -172,6 +177,7 @@ class MemoryStore:
             title=title,
             summary=summary,
             content=content,
+            importance=importance,
             created_at=now,
             updated_at=now,
             last_accessed_at=now,

@@ -60,6 +60,7 @@ class MemoryReadTool(BaseTool):
             "found": True,
             "id": record.id,
             "title": record.title,
+            "importance": record.importance,
             "revision": record.revision,
             "content": record.render_full(),
         }
@@ -151,6 +152,10 @@ class MemorySearchTool(BaseTool):
                     "summary": candidate.summary,
                     "revision": candidate.revision,
                     "snippet": candidate.snippet,
+                    "relevance_score": candidate.relevance_score,
+                    "retention_score": candidate.retention_score,
+                    "importance_score": candidate.importance_score,
+                    "rerank_score": candidate.rerank_score,
                     "vector_similarity": candidate.vector_similarity,
                     "vector_rank": candidate.vector_rank,
                     "bm25_rank": candidate.text_rank,
@@ -206,6 +211,7 @@ class MemoryListTool(BaseTool):
                     "id": record.id,
                     "title": record.title,
                     "summary": record.summary,
+                    "importance": record.importance,
                 }
                 for record in records
             ]
@@ -226,6 +232,7 @@ class MemoryCreateTool(BaseTool):
             description=(
                 "创建一条长期记忆。对未来跨会话仍有价值的信息才创建；"
                 f"写入条件：{MEMORY_WRITE_POLICY}"
+                "同时为记忆评估 0 到 1 的长期重要性。"
             ),
             parameters={
                 "type": "object",
@@ -246,8 +253,14 @@ class MemoryCreateTool(BaseTool):
                             "由系统单独渲染。"
                         ),
                     },
+                    "importance": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "description": "模型评估的长期重要性，0 表示低，1 表示关键。",
+                    },
                 },
-                "required": ["title", "summary", "content"],
+                "required": ["title", "summary", "content", "importance"],
                 "additionalProperties": False,
             },
             strict=False,
@@ -257,16 +270,22 @@ class MemoryCreateTool(BaseTool):
         title = arguments.get("title")
         summary = arguments.get("summary")
         content = arguments.get("content")
+        importance = arguments.get("importance")
         if not isinstance(title, str) or not title.strip():
             raise ValueError("'title' must be a non-empty string")
         if not isinstance(summary, str) or not summary.strip():
             raise ValueError("'summary' must be a non-empty string")
         if not isinstance(content, str) or not content.strip():
             raise ValueError("'content' must be a non-empty string")
+        if isinstance(importance, bool) or not isinstance(importance, (int, float)):
+            raise ValueError("'importance' must be a number within [0, 1]")
+        if not 0.0 <= float(importance) <= 1.0:
+            raise ValueError("'importance' must be within [0, 1]")
         record = await self._manager.create_if_capacity(
             title=title,
             summary=summary,
             content=content,
+            importance=float(importance),
         )
         if record is None:
             raise ValueError("active memory capacity is full")
@@ -274,6 +293,7 @@ class MemoryCreateTool(BaseTool):
             "id": record.id,
             "title": record.title,
             "summary": record.summary,
+            "importance": record.importance,
             "revision": record.revision,
         }
         return result
@@ -326,6 +346,12 @@ class MemoryUpdateTool(BaseTool):
                         "type": "string",
                         "description": "更新原因（留痕）。",
                     },
+                    "importance": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "description": "更新后的长期重要性，0 表示低，1 表示关键。",
+                    },
                 },
                 "required": [
                     "memory_id",
@@ -334,6 +360,7 @@ class MemoryUpdateTool(BaseTool):
                     "content",
                     "reason",
                     "expected_revision",
+                    "importance",
                 ],
                 "additionalProperties": False,
             },
@@ -347,6 +374,7 @@ class MemoryUpdateTool(BaseTool):
         content = arguments.get("content")
         reason = arguments.get("reason")
         expected_revision = arguments.get("expected_revision")
+        importance = arguments.get("importance")
         if not isinstance(memory_id, str) or not memory_id.strip():
             raise ValueError("'memory_id' must be a non-empty string")
         if not isinstance(title, str) or not title.strip():
@@ -359,6 +387,10 @@ class MemoryUpdateTool(BaseTool):
             raise ValueError("'reason' must be a non-empty string")
         if not isinstance(expected_revision, int) or expected_revision < 1:
             raise ValueError("'expected_revision' must be a positive integer")
+        if isinstance(importance, bool) or not isinstance(importance, (int, float)):
+            raise ValueError("'importance' must be a number within [0, 1]")
+        if not 0.0 <= float(importance) <= 1.0:
+            raise ValueError("'importance' must be within [0, 1]")
         record = await self._manager.update_if_revision(
             memory_id,
             expected_revision=expected_revision,
@@ -366,6 +398,7 @@ class MemoryUpdateTool(BaseTool):
             summary=summary,
             content=content,
             reason=reason,
+            importance=float(importance),
         )
         return {
             "id": record.id,

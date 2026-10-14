@@ -11,6 +11,7 @@ from app.agent.budget import RunBudget, RunBudgetConfig
 from app.model.config import AgentMode, Message, MessageRole
 from app.agent.events import AgentEventHandler, AgentEventType, NullEventHandler
 from app.agent.loop import AgentLoop
+from app.agent.light import LightAgentLoop, LightStateStore
 from app.agent.result import AgentResult
 from app.agent.post_run import MemoryCoordinator
 from app.checkpoint.config import RunCheckpoint
@@ -71,6 +72,7 @@ class AgentRuntime:
         workspace_root: str | Path | None = None,
         memory_auto_search_enabled: bool = True,
         ace: AceCoordinator | None = None,
+        light_state_store: LightStateStore | None = None,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps must be at least 1")
@@ -133,12 +135,27 @@ class AgentRuntime:
             handoff_store=handoff_store,
             workspace_root=workspace_root,
         )
+        self._light_loop = LightAgentLoop(
+            model_registry=model_registry,
+            tool_registry=tool_registry,
+            tool_executor=self._tool_executor,
+            provider=provider,
+            model=model,
+            system_prompt=self._system_prompt,
+            max_steps=max_steps,
+            max_tool_rounds=max_tool_rounds,
+            max_output_tokens=max_output_tokens,
+            checkpoint_store=checkpoint_store,
+            run_budget=self._run_budget,
+            state_store=light_state_store or LightStateStore(),
+        )
 
     def set_max_output_tokens(self, value: int | None) -> None:
         """Update the output cap for subsequent runs in this runtime."""
         if value is not None and value < 1:
             raise ValueError("max_output_tokens must be at least 1")
         self._loop.set_max_output_tokens(value)
+        self._light_loop.set_max_output_tokens(value)
 
     async def flush_background_tasks(self) -> None:
         """Wait for detached ACE reflection tasks before application shutdown."""
@@ -187,7 +204,12 @@ class AgentRuntime:
                     ),
                 )
             try:
-                result = await self._loop.run(
+                loop = (
+                    self._light_loop
+                    if mode is AgentMode.LIGHT
+                    else self._loop
+                )
+                result = await loop.run(
                     run_id,
                     user_input,
                     history=history,

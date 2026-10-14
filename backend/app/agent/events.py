@@ -118,6 +118,18 @@ class AgentEvent(BaseModel):
     summary_text: str | None = None
     cache_prefix_reused: bool | None = None
     cache_prefix_message_count: int | None = Field(default=None, ge=0)
+    cache_layout_version: int | None = Field(default=None, ge=1)
+    cache_first_changed_layer: str | None = None
+    cache_fixed_message_count: int | None = Field(default=None, ge=0)
+    cache_session_message_count: int | None = Field(default=None, ge=0)
+    cache_recent_start_message: int | None = Field(default=None, ge=0)
+    cache_recent_breakpoint_positions: tuple[int, ...] = ()
+    cache_volatile_start_message: int | None = Field(default=None, ge=0)
+    cache_tools_hash: str | None = None
+    cache_fixed_prefix_hash: str | None = None
+    cache_session_prefix_hash: str | None = None
+    cache_recent_prefix_hashes: tuple[str, ...] = ()
+    cache_volatile_tail_hash: str | None = None
     reflection_triggered: bool | None = None
     reflection_action: str | None = None
     reflection_duration_ms: float | None = Field(default=None, ge=0.0)

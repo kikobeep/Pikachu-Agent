@@ -8,6 +8,7 @@ from typing import Any
 from app.agent.budget import RunBudgetConfig
 from app.agent.events import AgentEventHandler
 from app.agent.runtime import AgentRuntime
+from app.agent.light import LightStateStore
 from app.ace import AceCoordinator
 from app.agent.spec import load_agent_prompt, resolve_agent_md_path
 from app.checkpoint.store import CheckpointStore
@@ -330,6 +331,11 @@ class Application:
         '''
         checkpoint_store = CheckpointStore(database)
         await checkpoint_store.initialize()
+
+        # /light 模式的结构化执行状态；与 Evidence / RunStore 共用 SQLite，
+        # 但通过 conversation_id 严格隔离状态查询。
+        light_state_store = LightStateStore(database)
+        await light_state_store.initialize()
         
         '''
         rule_store: 工具的允许／拒绝规则、参数匹配条件、适用范围。工具执行前匹配规则（ALLOW/deny/ask）；用户选择记住审批决定时保存规则
@@ -519,6 +525,7 @@ class Application:
             tool_output_recorder=evidence_recorder,
         
             run_budget_config=self._run_budget_config,
+            light_state_store=light_state_store,
         )
 
 
@@ -551,6 +558,7 @@ class Application:
         self.evidence_store = evidence_store
         self.trace_store = trace_store
         self.checkpoint_store = checkpoint_store
+        self.light_state_store = light_state_store
         self.rule_store = rule_store
         self.policy_engine = policy_engine
         # self.approval_store = approval_store

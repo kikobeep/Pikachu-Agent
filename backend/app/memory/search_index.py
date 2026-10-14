@@ -323,12 +323,17 @@ class MemorySearchIndex:
         # 两条检索路径分别保留自己的候选配额，然后取并集。这样 top_k=2
         # 时不会退化成“向量路径返回两个”，而是尽量得到 1 条向量 + 1 条 BM25。
         limit = limit or self.configs.top_k
+        # 先多取候选，二阶段再由 MemorySearchService 融合相关性、保留度
+        # 和重要性；如果这里只取最终 top_k，旧记忆永远没有机会参与重排。
+        rerank_pool = max(limit * self.configs.candidate_multiplier, limit)
         vector_fetch = max(
             self.configs.vector_top_k * self.configs.candidate_multiplier,
+            rerank_pool,
             self.configs.vector_top_k,
         )
         text_fetch = max(
             self.configs.text_top_k * self.configs.candidate_multiplier,
+            rerank_pool,
             self.configs.text_top_k,
         )
         vector_hits = await self._vector_search(query, vector_fetch)
@@ -355,9 +360,11 @@ class MemorySearchIndex:
             hit.memory_id: rank
             for rank, hit in enumerate(text_memory_hits, start=1)
         }
+        # 先保留一个比最终 top_k 更大的候选池，交给 MemorySearchService
+        # 结合 retention / importance 做二阶段重排；不能在这里过早截断。
         selected_ids = set(
-            list(vector_rank_by_memory)[: self.configs.vector_top_k]
-            + list(text_rank_by_memory)[: self.configs.text_top_k]
+            list(vector_rank_by_memory)[:rerank_pool]
+            + list(text_rank_by_memory)[:rerank_pool]
         )
         scores: dict[str, float] = {}
         best_chunk: dict[str, tuple[float, str, str]] = {} #多个chunk可能对应同一条memory，对于该memory，保留分数最高的chunk
@@ -397,7 +404,7 @@ class MemorySearchIndex:
                 vector_rank=vector_rank_by_memory.get(memory_id),
                 text_rank=text_rank_by_memory.get(memory_id),
             )
-            for memory_id in ordered[:limit]
+            for memory_id in ordered[:rerank_pool]
         )
         if vector_hits is not None and text_hits is not None:
             mode = SearchMode.HYBRID

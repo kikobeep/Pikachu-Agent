@@ -50,6 +50,8 @@ class RegularMemoryRecord(BaseModel):
     updated_at: datetime
     last_accessed_at: datetime
     access_count: int = Field(default=0, ge=0)
+    # 普通记忆的重要性由写入/反思模型评估；旧记忆缺少该字段时按普通重要性处理。
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
     revision: int = Field(default=1, ge=1)
     status: MemoryStatus = MemoryStatus.ACTIVE
     last_update_reason: str | None = None
@@ -125,6 +127,7 @@ class RegularMemoryRecord(BaseModel):
             "updated_at": iso_time(self.updated_at),
             "last_accessed_at": iso_time(self.last_accessed_at),
             "access_count": self.access_count,
+            "importance": self.importance,
             "revision": self.revision,
             "status": self.status.value,
         }
@@ -193,6 +196,5 @@ class RegularMemoryIndex:
             lines.append(f"Cue: {cue}")
             lines.append("")
         return "\n".join(lines).rstrip() + "\n"
-
 
 

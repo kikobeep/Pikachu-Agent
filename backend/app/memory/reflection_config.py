@@ -81,6 +81,7 @@ class ReflectionDecision(BaseModel):
     title: str | None = None
     summary: str | None = None
     content: str | None = None
+    importance: float | None = None
     reason: str
 
     @field_validator(
@@ -114,6 +115,7 @@ class ReflectionDecision(BaseModel):
                     self.title,
                     self.summary,
                     self.content,
+                    self.importance,
                 )
             ):
                 raise ValueError("none decision cannot contain mutation fields")
@@ -121,15 +123,31 @@ class ReflectionDecision(BaseModel):
         if self.action is ReflectionAction.CREATE:
             if self.memory_id is not None:
                 raise ValueError("create decision cannot contain memory_id")
-            if not self.title or not self.summary or not self.content:
-                raise ValueError("create decision requires title, summary, and content")
+            if (
+                not self.title
+                or not self.summary
+                or not self.content
+                or self.importance is None
+            ):
+                raise ValueError(
+                    "create decision requires title, summary, content, and importance"
+                )
+            if not 0.0 <= self.importance <= 1.0:
+                raise ValueError("importance must be within [0, 1]")
             return self
         if not self.memory_id:
             raise ValueError("update decision requires a valid memory_id")
-        if not self.title or not self.summary or not self.content:
+        if (
+            not self.title
+            or not self.summary
+            or not self.content
+            or self.importance is None
+        ):
             raise ValueError(
-                "update decision requires title, summary, and complete content"
+                "update decision requires title, summary, content, and importance"
             )
+        if not 0.0 <= self.importance <= 1.0:
+            raise ValueError("importance must be within [0, 1]")
         return self.model_copy(
             update={"memory_id": normalize_memory_id(self.memory_id)}
         )

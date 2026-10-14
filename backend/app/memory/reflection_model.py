@@ -43,6 +43,12 @@ _MEMORY_REFLECTION_SYSTEM_PROMPT = """
     - 后续会话可能需要回顾的项目背景
     - 后续会话可能会用到的所有原子事实（比如日期、金钱、地点、人物、关系等等）
 
+对每条 create/update 记忆同时评估 `importance`（0 到 1）：
+- 0.8-1.0：长期硬约束、安全要求或忽略后风险很高的信息；
+- 0.5-0.79：跨任务仍有明显复用价值的稳定事实；
+- 0.0-0.49：临时性较强、只在特定主题下有用的信息。
+importance 表示长期保留价值，不表示它与当前问题的相关性。
+
 2. 不要保存：
     - 当前任务进度或待办步骤。
     - 临时约束或一次性信息。
@@ -95,13 +101,14 @@ _MEMORY_REFLECTION_SYSTEM_PROMPT = """
   "title": null,
   "summary": null,
   "content": null,
+  "importance": null,
   "reason": "简要说明判断依据"
 }
 
 字段要求：
-- `create`：必须提供 `title`、`summary` 和 `content`，`memory_id` 为 `null`。
-- `update`：必须提供 `memory_id`，以及完整替换后的 `title`、`summary` 和 `content`，确保索引提示与正文一致。
-- `none`：`memory_id`、`title`、`summary` 和 `content` 必须全部为 `null`。
+- `create`：必须提供 `title`、`summary`、`content` 和 `importance`，`memory_id` 为 `null`。
+- `update`：必须提供 `memory_id`，以及完整替换后的 `title`、`summary`、`content` 和 `importance`，确保索引提示与正文一致。
+- `none`：`memory_id`、`title`、`summary`、`content` 和 `importance` 必须全部为 `null`。
 - 所有操作都必须提供 `reason`。
 """
 

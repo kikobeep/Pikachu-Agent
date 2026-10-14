@@ -56,6 +56,7 @@ class ContextRuntime:
         self._skill_context_provider = skill_context_provider
         self._skill_store = skill_store
         self._skill_loaded = False
+        self._skill_metadata = ()
         self._active_skills: dict[str, Skill] = {}
 
         # plan
@@ -88,10 +89,12 @@ class ContextRuntime:
         if self._skill_context_provider and self._skill_store:
             if not self._skill_loaded:
                 self._skill_loaded = True
-            try:
-                self._skill_metadata = await self._skill_store.list_metadata()
-            except Exception:
-                self._skill_metadata = ()
+                try:
+                    # 同一个 Run 内冻结 Skill 元数据，避免每轮重读文件导致
+                    # 会话缓存前缀无意义地变化；下一次 Run 再建立新快照。
+                    self._skill_metadata = await self._skill_store.list_metadata()
+                except Exception:
+                    self._skill_metadata = ()
             metadata_message = self._skill_context_provider.get_meta_message(self._skill_metadata)
             if metadata_message is not None:
                 messages.append(metadata_message)

@@ -31,6 +31,7 @@ from .events import (
     MultiEventHandlers,
 )
 from .loop import AgentLoop
+from .light import LightAgentLoop, LightStateStore
 from .result import (
     AgentError,
     AgentResult,
@@ -53,6 +54,8 @@ __all__ = [
     'AgentEventHook',
     'AgentEventType',
     'AgentLoop',
+    'LightAgentLoop',
+    'LightStateStore',
     'AgentMode',
     'AgentResult',
     'AgentRuntime',

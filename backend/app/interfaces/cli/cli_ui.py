@@ -114,6 +114,7 @@ def print_banner(
         ("", "38;5;245"),
         ("Tips for getting started", "1;38;5;216"),
         ("/plan       enter planning mode", "38;5;117"),
+        ("/light      use execution-state mode", "38;5;117"),
         ("/help       list commands", "38;5;117"),
         ("/new        start a fresh conversation", "38;5;117"),
         ("/memories   inspect long-term memory", "38;5;117"),
@@ -685,6 +686,8 @@ def print_help() -> None:
         "  /compact          手动压缩上下文，保留近期对话\n"
         "  /plan             进入 PLAN MODE（只规划，不修改文件）\n"
         "  /plan off         退出 PLAN MODE，恢复普通执行\n"
+        "  /light            进入 LIGHT MODE，使用结构化执行状态\n"
+        "  /light off        退出 LIGHT MODE，恢复普通执行\n"
         "  /help             显示帮助\n"
         "  /exit 或 /quit    退出聊天"
     )

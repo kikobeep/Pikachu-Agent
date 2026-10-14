@@ -11,6 +11,7 @@ from app.memory.utils import normalize_memory_id
 from app.model.config import Message, ModelUsage
 from app.tools.config import ToolDefinition
 
+from .cache_layout import CacheLayout
 from .budget import RunBudgetConfig, RunBudgetDecision, RunBudgetStatus
 from app.model.config import ToolCall,ModelProvider
 
@@ -246,6 +247,7 @@ class RequestPrefixState:
     context_messages: tuple[Message, ...]
     tools: tuple[ToolDefinition, ...]
     sent_messages: tuple[Message, ...]
+    cache_layout: CacheLayout | None = None
 
     def extend(
         self,

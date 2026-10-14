@@ -152,8 +152,15 @@ async def _run(args,*,offer_setup: bool = True,):
         reflection_provider = app.memory_reflector.provider_hint or "未解析"
 
         context_window = app.context_manager.context_window_for(provider, model)
+        initial_mode = (
+            AgentMode.LIGHT
+            if getattr(args, "light", False)
+            else AgentMode.PLAN
+            if args.plan
+            else AgentMode.DEFAULT
+        )
         visible_tools = tuple(
-            tool_registry.definitions_for_mode(AgentMode.DEFAULT)
+            tool_registry.definitions_for_mode(initial_mode)
         )
         context_used = default_token_estimator().estimate_request(
             history,
@@ -166,7 +173,7 @@ async def _run(args,*,offer_setup: bool = True,):
                 ("Model", f"{provider}/{model}"),
                 ("Power", format_power_bar(context_used, context_window)),
                 ("Context", f"{context_used:,} / {context_window:,}"),
-                ("Mode", "exploring"),
+                ("Mode", initial_mode.value),
             )
         )
 
@@ -206,7 +213,7 @@ async def _run(args,*,offer_setup: bool = True,):
                 history=history,
                 content=args.message,
                 model=model,
-                mode=AgentMode.PLAN if args.plan else AgentMode.DEFAULT,
+                mode=initial_mode,
             )
             await _skill_mining(skill_miner)
             return 0 if success else 1
@@ -217,7 +224,7 @@ async def _run(args,*,offer_setup: bool = True,):
             conversation=conversation,
             history=history,
             system_prompt=effective_system_prompt,
-            mode=AgentMode.PLAN if args.plan else AgentMode.DEFAULT,
+            mode=initial_mode,
         )
     finally:
         await app.close()
@@ -241,6 +248,14 @@ async def _run_interactive(*, app, conversation, history, system_prompt, mode) -
         if content in {"/plan", "/plan on"}:
             mode = AgentMode.PLAN
             print("已进入 PLAN MODE：只分析和制定计划，不修改文件或执行命令。")
+            continue
+        if content in {"/light", "/light on"}:
+            mode = AgentMode.LIGHT
+            print("已进入 LIGHT MODE：使用执行状态而不是完整历史对话驱动当前 Run。")
+            continue
+        if content == "/light off":
+            mode = AgentMode.DEFAULT
+            print("已退出 LIGHT MODE：恢复普通执行模式。")
             continue
         if content in {"/plan off", "/execute"}:
             mode = AgentMode.DEFAULT
@@ -465,6 +480,11 @@ def _parse_args() -> argparse.Namespace:
         help="启动后进入 PLAN MODE，只分析和制定计划，不修改文件或执行命令。",
     )
     parser.add_argument(
+        "--light",
+        action="store_true",
+        help="启动后进入 LIGHT MODE，使用结构化执行状态而不是完整历史上下文。",
+    )
+    parser.add_argument(
         "--setup",
         action="store_true",
         help="启动交互式模型设置，密钥优先保存到 macOS Keychain。",
@@ -540,6 +560,8 @@ def _parse_args() -> argparse.Namespace:
         parser.error("--max-steps must be greater than zero")
     if args.max_tool_rounds <= 0:
         parser.error("--max-tool-rounds must be greater than zero")
+    if args.plan and args.light:
+        parser.error("--plan 和 --light 不能同时使用")
     if args.conversation and args.new_conversation:
         parser.error("--conversation and --new-conversation cannot be used together")
     if args.setup and (args.message or args.conversation or args.new_conversation):

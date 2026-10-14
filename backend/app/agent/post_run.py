@@ -169,6 +169,11 @@ class MemoryCoordinator:
                 title=decision.title or "",
                 summary=decision.summary or "",
                 content=decision.content or "",
+                importance=(
+                    decision.importance
+                    if decision.importance is not None
+                    else 0.5
+                ),
                 reason=decision.reason,
             )
 
@@ -189,6 +194,11 @@ class MemoryCoordinator:
                 title=decision.title or "",
                 summary=decision.summary or "",
                 content=decision.content or "",
+                importance=(
+                    decision.importance
+                    if decision.importance is not None
+                    else 0.5
+                ),
             )
             if record is None:
                 raise RuntimeError(

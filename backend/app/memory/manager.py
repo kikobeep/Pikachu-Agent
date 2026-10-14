@@ -159,6 +159,7 @@ class MemoryManager:
         summary: str,
         content: str,
         reason: str,
+        importance: float | None = None,
     ) -> RegularMemoryRecord:
         # 同一管理器内串行更新，避免并发写入
         async with self._lock:
@@ -168,6 +169,7 @@ class MemoryManager:
                 summary=summary,
                 content=content,
                 reason=reason,
+                importance=importance,
                 expected_revision=expected_revision,
             )
             # 同步更新index.md
@@ -235,13 +237,17 @@ class MemoryManager:
         title: str,
         summary: str,
         content: str,
+        importance: float = 0.5,
     ):
         async with self._lock:
             # 写锁保护范围内再次检查
             if await self.store.count_active() >= self.max_active:
                 return None
             record = await self.store.create(
-                title=title, summary=summary, content=content
+                title=title,
+                summary=summary,
+                content=content,
+                importance=importance,
             )
             await self._rebuild_regular_memory_index()
             await self._reconcile_search_index()
@@ -288,6 +294,7 @@ class MemoryManager:
         summary: str,
         content: str,
         reason: str,
+        importance: float | None = None,
     ) -> RegularMemoryRecord:
         return await self.update_regular_memory(
             memory_id,
@@ -296,6 +303,7 @@ class MemoryManager:
             summary=summary,
             content=content,
             reason=reason,
+            importance=importance,
         )
 
     async def archive(self, memory_id: str, *, reason: str) -> RegularMemoryRecord:

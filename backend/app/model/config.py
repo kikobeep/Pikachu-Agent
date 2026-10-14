@@ -183,6 +183,7 @@ class ModelResponse(BaseModel):
 class AgentMode(StrEnum):
     DEFAULT = "default"
     PLAN = "plan"
+    LIGHT = "light"
 
 
 class MessageRole(StrEnum):
