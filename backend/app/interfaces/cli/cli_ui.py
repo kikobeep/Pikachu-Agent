@@ -10,10 +10,12 @@ import sys
 import tempfile
 import unicodedata
 from collections.abc import Callable, Sequence
+from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
+from PIL import Image
 from app.model.config import ModelConfig, ModelProvider
 from app.tools.search.settings import SearchSettings
 from dotenv import set_key
@@ -32,6 +34,90 @@ _PROVIDER_LABELS = {
     ModelProvider.QWEN: "Qwen",
     ModelProvider.DEEPSEEK: "DeepSeek",
 }
+
+_AGENT_CHOICES = (
+    ("1", "Lucario 路卡利欧", "Aura-guided precision", "full-power coding"),
+    ("2", "Jigglypuff 胖丁", "A voice full of charm", "full-power creation"),
+    ("3", "Psyduck 可达鸭", "Ponders every puzzle", "plan before acting"),
+    ("4", "Pikachu 皮卡丘", "Lightning-fast energy", "quick, light tasks"),
+)
+
+_MODE_BADGES = {
+    "1": ("NORMAL", (24, 91, 156), (234, 246, 255)),
+    "2": ("NORMAL", (24, 91, 156), (234, 246, 255)),
+    "3": ("PLAN", (243, 185, 36), (28, 34, 42)),
+    "4": ("LIGHT", (219, 84, 172), (255, 246, 252)),
+}
+
+_TRAINER_ART_HEIGHT = 12
+
+
+def _trainer_art_row(chooser_rows: int) -> int:
+    """Body row where the two supplied trainer images begin."""
+    return 2 + max(0, (chooser_rows - (2 + _TRAINER_ART_HEIGHT)) // 2)
+
+_PORTRAIT_FILES = {
+    "1": "agent_lucario.png",
+    "2": "agent_jigglypuff.png",
+    "3": "agent_psyduck.png",
+    "4": "agent_pikachu.png",
+}
+
+
+def _portrait_size(*, compact: bool, inline: bool) -> tuple[int, int]:
+    if inline:
+        return (6, 6) if compact else (8, 8)
+    return (8, 6) if compact else (12, 8)
+
+
+def _chooser_width(width: int) -> int:
+    if width < 130:
+        return 40
+    return min(64, max(43, width // 3 + 8))
+
+
+def _left_column_width(width: int) -> int:
+    if width >= 155:
+        return 34
+    if width >= 130:
+        return 30
+    if width >= 105:
+        return 24
+    return 30 if width >= 76 else width - 4
+
+
+@lru_cache(maxsize=12)
+def _portrait_pixels(agent: str, width: int, height: int) -> tuple[tuple[tuple[int, int, int], ...], ...]:
+    """Render the supplied character cutouts with crisp pixel edges."""
+    path = Path(__file__).with_name("assets") / _PORTRAIT_FILES[agent]
+    with Image.open(path) as source:
+        background = Image.new("RGBA", source.size, (21, 29, 40, 255))
+        background.alpha_composite(source.convert("RGBA"))
+        portrait = background.convert("RGB").resize((width, height), Image.Resampling.NEAREST)
+        return tuple(
+            tuple(portrait.getpixel((x, y)) for x in range(width))
+            for y in range(height)
+        )
+
+
+def _portrait_line(agent: str, row: int, *, use_color: bool, width: int, height: int) -> str:
+    pixels = _portrait_pixels(agent, width, height)
+    if not use_color:
+        return "▀" * width
+    pieces = []
+    for top, bottom in zip(pixels[row * 2], pixels[row * 2 + 1]):
+        foreground = ";".join(map(str, top))
+        background = ";".join(map(str, bottom))
+        pieces.append(f"\033[38;2;{foreground};48;2;{background}m▀")
+    return "".join(pieces) + "\033[0m"
+
+
+def terminal_size(fallback: tuple[int, int] = (100, 24)) -> os.terminal_size:
+    """Read the PTY size directly so stale COLUMNS/LINES cannot shrink the scene."""
+    try:
+        return os.get_terminal_size(sys.stdout.fileno())
+    except (AttributeError, OSError, ValueError):
+        return shutil.get_terminal_size(fallback)
 
 
 def _terminal_display_width(text: str) -> int:
@@ -65,88 +151,267 @@ def print_banner(
     *,
     output_fn: Callable[[str], Any] = print,
     status: Sequence[tuple[str, str]] = (),
-) -> None:
-    """Print the Pikachu welcome panel with optional live runtime status."""
-    use_color = output_fn is print and not os.environ.get("NO_COLOR")
+    selected_agent: str = "1",
+) -> bool:
+    """Render the welcome information using live terminal text."""
+    if output_fn is print:
+        from app.interfaces.cli.image_banner import print_image_banner
 
-    def style(text: str, code: str) -> str:
-        return f"\033[{code}m{text}\033[0m" if use_color else text
+        if print_image_banner(status, selected_agent=selected_agent):
+            return True
 
-    terminal_width = shutil.get_terminal_size((100, 24)).columns
-    inner_width = max(76, min(terminal_width - 4, 160))
-    left_width = 36
-    right_width = max(32, inner_width - left_width - 7)
-
-    def cell(text: str, width: int, code: str) -> str:
-        # Python len() counts code points, not terminal columns.  This matters
-        # for symbols such as ⚡ and CJK text; fit first, then add ANSI color.
-        fitted = _fit_terminal_text(text, width)
-        padding = max(0, width - _terminal_display_width(fitted))
-        return style(fitted + (" " * padding), code)
-
-    left = [
-        ("Welcome back!", "1;38;5;255"),
-        ("", "38;5;245"),
-        ("", "38;5;245"),
-        ("                         · · ·", "38;5;33"),
-        ("         ┌───────────────┐", "38;5;33"),
-        ("         │     •  •      │╭", "38;5;33"),
-        ("         │               ││", "38;5;33"),
-        ("         │       ─       │╯", "38;5;33"),
-        ("         └───────────────┘", "38;5;33"),
-        ("               │   │", "38;5;33"),
-    ]
-
-    right: list[tuple[str, str]] = [("⚡ PIKA STATUS", "1;38;5;216")]
-    if status:
-        right.extend(
-            (f"{label:<9} {value}", "38;5;252")
-            for label, value in status
+    use_color = output_fn is print and _terminal_ui_color_enabled()
+    terminal = terminal_size((100, 24))
+    output_fn(
+        _render_banner_text(
+            status,
+            width=max(20, min(terminal.columns - 2, 174 if terminal.columns >= 134 else 120)),
+            terminal_lines=terminal.lines,
+            use_color=use_color,
+            selected_agent=selected_agent,
         )
+    )
+    return False
+
+
+def _render_banner_text(
+    status: Sequence[tuple[str, str]],
+    *,
+    width: int,
+    terminal_lines: int,
+    use_color: bool,
+    scene: bool = True,
+    compact: bool = False,
+    selected_agent: str = "1",
+    inline_portraits: bool = False,
+    inline_trainer: bool = False,
+    large_titles: bool = False,
+) -> str:
+    """Build the text frame; image-capable terminals draw it over the scene."""
+    split = width >= 76
+    three_columns = width >= 105
+    left_width = _left_column_width(width)
+    chooser_width = _chooser_width(width) if three_columns else 0
+    right_width = width - left_width - (chooser_width + 10 if three_columns else 7) if split else width - 4
+
+    def style(text: str, color: str, *, background: bool = False) -> str:
+        if not use_color:
+            return text
+        bg = ";48;2;21;29;40" if background else ""
+        return f"\033[{color}{bg}m{text}\033[0m"
+
+    def cell(text: str, cell_width: int, color: str) -> str:
+        fitted = _fit_terminal_text(text, cell_width)
+        return style(
+            fitted + " " * (cell_width - _terminal_display_width(fitted)),
+            color,
+            background=True,
+        )
+
+    def heading_cell(text: str, cell_width: int, *, top: bool = False) -> str:
+        fitted = _fit_terminal_text(text, cell_width)
+        padded = fitted + " " * (cell_width - _terminal_display_width(fitted))
+        if not use_color:
+            return padded
+        foreground = "244;239;205" if top else "123;232;237"
+        background = "21;29;40"
+        return f"\033[1;38;2;{foreground};48;2;{background}m{padded}\033[0m"
+
+    # The supplied earthrise sketch inspires the sky and cratered foreground.
+    # These are text cells so the welcome screen works in ordinary terminals.
+    sky: list[str] = []
+    earth = ("  ▄▓▄  ", " ▟▓▒▓▙ ", "  ▀▓▀  ")
+    sky_rows = 2 if terminal_lines <= 26 else 3
+    for row in range(sky_rows):
+        stars = [" " for _ in range(width)]
+        for col in range(width):
+            seed = (col * 73 + row * 137 + col * col * 11) % 127
+            if seed in (0, 1, 4):
+                stars[col] = "✦" if seed == 0 else "·"
+        start = max(0, width - 12)
+        sky.append(
+            style("".join(stars[:start]), "38;2;154;190;219")
+            + style(earth[row], "1;38;2;67;151;222")
+            + style("".join(stars[start + len(earth[row]) :]), "38;2;154;190;219")
+        )
+
+    left: list[tuple[str, str]] = [
+        ("Welcome", "1;38;2;210;246;250"),
+        ("", "38;2;130;155;171"),
+        ("    ╔════╗       ╭──────────────╮", "38;2;255;214;83"),
+        ("   ╔╝▓▓▓▓╚╗      │ Ready to     │", "38;2;255;214;83"),
+        ("   ║ ▀  ▀ ║      │ explore      │", "38;2;255;214;83"),
+        ("   ╚╗ ▿  ╔╝      │ together!    │", "38;2;255;214;83"),
+        ("    ╚╦══╦╝       ╰──╮───────────╯", "38;2;255;214;83"),
+        ("     ║██║           ╰", "38;2;255;214;83"),
+        ("     ║██║", "38;2;255;214;83"),
+        ("     ╚══╝", "38;2;255;214;83"),
+        ("", "38;2;130;155;171"),
+    ]
+    if inline_portraits or inline_trainer:
+        left = [left[0], *(("", "38;2;130;155;171") for _ in range(13))]
+    right: list[tuple[str, str]] = [("▣ PIKA STATUS", "1;38;2;67;222;232")]
+    right.extend(
+        (f"{label:<9} {value}", "38;2;226;235;242")
+        for label, value in (status or (
+            ("Model", "loading"), ("Power", "standby"),
+            ("Context", "waiting"), ("Mode", "setup"),
+        ))
+    )
+    if compact:
+        right.extend([
+            ("▣ Tips  /plan  /light  /help", "1;38;2;67;222;232"),
+            ("/new  /memories  /trace", "38;2;154;218;231"),
+        ])
     else:
         right.extend([
-            ("Model     loading", "38;5;252"),
-            ("Power     standby", "38;5;252"),
-            ("Context   waiting", "38;5;252"),
-            ("Mode      setup", "38;5;252"),
+            ("", "38;2;130;155;171"),
+            ("▣ Tips for getting started", "1;38;2;67;222;232"),
+            ("/plan       enter planning mode", "38;2;154;218;231"),
+            ("/light      use execution-state mode", "38;2;154;218;231"),
+            ("/help       list commands", "38;2;154;218;231"),
+            ("/new        start a fresh conversation", "38;2;154;218;231"),
+            ("/memories   inspect long-term memory", "38;2;154;218;231"),
+            ("/trace      inspect a run and reflection", "38;2;154;218;231"),
         ])
-    right.extend([
-        ("", "38;5;245"),
-        ("Tips for getting started", "1;38;5;216"),
-        ("/plan       enter planning mode", "38;5;117"),
-        ("/light      use execution-state mode", "38;5;117"),
-        ("/help       list commands", "38;5;117"),
-        ("/new        start a fresh conversation", "38;5;117"),
-        ("/memories   inspect long-term memory", "38;5;117"),
-        ("/trace      inspect a run and reflection", "38;5;117"),
-        ("", "38;5;245"),
-        ("Type a message to begin.", "3;38;5;245"),
-    ])
 
-    lines = [
-        "",
-        style(
-            "╭"
-            + _fit_terminal_text("─ Pikachu CLI · local agent workspace", inner_width - 2).ljust(
-                inner_width - 2, "─"
+    if large_titles and three_columns:
+        blank_title = ("", "38;2;130;155;171")
+        right.insert(1, blank_title)
+        tips_row = next(index for index, (text, _) in enumerate(right) if text.startswith("▣ Tips"))
+        right.insert(tips_row + 1, blank_title)
+
+    if not three_columns:
+        right.append(("", "38;2;130;155;171"))
+        right.append(("▣ Choose your mode · 输入 1-4", "1;38;2;67;222;232"))
+        if compact:
+            right.extend([
+                ("1 路卡利欧  2 胖丁", "38;2;154;218;231"),
+                ("3 可达鸭    4 皮卡丘", "38;2;154;218;231"),
+            ])
+        else:
+            right.extend(
+                (
+                    f"{key} {name} · {trait}; {purpose} [{_MODE_BADGES[key][0]}]",
+                    "38;2;154;218;231",
+                )
+                for key, name, trait, purpose in _AGENT_CHOICES
             )
-            + "╮",
-            "1;38;5;216",
-        ),
-    ]
-    border = style("│", "38;5;216")
-    for index in range(max(len(left), len(right))):
-        left_text, left_code = left[index] if index < len(left) else ("", "38;5;245")
-        right_text, right_code = right[index] if index < len(right) else ("", "38;5;245")
-        lines.append(
-            border + " "
-            + cell(left_text, left_width, left_code)
-            + " " + border + " "
-            + cell(right_text, right_width, right_code)
-            + " " + border
+    frame = "1;38;2;67;222;232"
+
+    def edge(text: str) -> str:
+        return style(text, frame, background=True)
+
+    lines = (["", *sky] if scene else []) + [edge("╔" + "═" * (width - 2) + "╗")]
+    chrome = "▣  ▪ ▪ ▪    Pikachu CLI · local agent workspace"
+    lines.append(edge("║") + heading_cell(" " + chrome, width - 2, top=True) + edge("║"))
+    if large_titles:
+        lines.append(edge("║") + heading_cell("", width - 2, top=True) + edge("║"))
+    lines.append(edge("╠" + "═" * (width - 2) + "╣"))
+    if split:
+        lunar_window = (
+            "      ░░▒▒▒▒▒░░▒▒▒░░",
+            "  ░▒▒▒◜___◝▒▒░░▒▒▒▒",
+            "▒▒▒▒▒▒◟▒▒▒◞▒▒▒▒▒▒▒▒",
         )
-    lines.extend([style("╰" + "─" * (inner_width - 2) + "╯", "38;5;216"), ""])
-    output_fn("\n".join(lines))
+        portrait_width, portrait_height = _portrait_size(
+            compact=compact or width < 130, inline=inline_portraits
+        )
+        portrait_lines = portrait_height // 2
+        chooser_header_rows = 2 if large_titles else 1
+        chooser_rows = chooser_header_rows + portrait_lines * len(_AGENT_CHOICES) if three_columns else 0
+        if three_columns:
+            blank = ("", "38;2;130;155;171")
+            mascot_top = _trainer_art_row(chooser_rows) - 2
+            left = [left[0], *([blank] * mascot_top), *left[1:]]
+        for index in range(max(len(left), len(right), chooser_rows)):
+            if index < len(left):
+                left_text, left_color = left[index]
+                if three_columns and width < 130 and index >= 2:
+                    left_text = left_text.strip().center(left_width)
+            else:
+                scene_row = index - len(left)
+                left_text = (
+                    lunar_window[scene_row]
+                    if scene and scene_row < len(lunar_window)
+                    else ""
+                )
+                left_color = "38;2;105;112;121"
+            right_text, right_color = right[index] if index < len(right) else ("", "38;2;130;155;171")
+            left_cell = (
+                heading_cell(left_text, left_width)
+                if large_titles and index in (0, 1)
+                else cell(left_text, left_width, left_color)
+            )
+            line = edge("║ ") + left_cell
+            if three_columns:
+                if index == 0:
+                    line += edge(" ║ ") + heading_cell("Choose your mode · 1-4", chooser_width)
+                elif large_titles and index == 1:
+                    line += edge(" ║ ") + heading_cell("", chooser_width)
+                elif index >= chooser_rows:
+                    line += edge(" ║ ") + cell("", chooser_width, "38;2;185;235;241")
+                else:
+                    option = (index - chooser_header_rows) // portrait_lines
+                    portrait_row = (index - chooser_header_rows) % portrait_lines
+                    key, name, trait, purpose = _AGENT_CHOICES[option]
+                    label = name if portrait_row == 0 else ""
+                    color = "1;38;2;255;214;83" if key == selected_agent else "38;2;185;235;241"
+                    marker = f"{'›' if key == selected_agent else ' '}{key} " if portrait_row == 0 else "   "
+                    if inline_portraits:
+                        portrait = cell("", portrait_width, color)
+                    else:
+                        portrait = _portrait_line(
+                            key, portrait_row, use_color=use_color,
+                            width=portrait_width, height=portrait_height,
+                        )
+                    label_width = chooser_width - 3 - portrait_width
+                    if portrait_row == 2:
+                        badge_name, badge_bg, badge_fg = _MODE_BADGES[key]
+                        badge_text = f" {badge_name.center(8)} "
+                        description_width = label_width - len(badge_text)
+                        description_cell = cell(" " + purpose, description_width, color)
+                        if use_color:
+                            foreground = ";".join(map(str, badge_fg))
+                            background = ";".join(map(str, badge_bg))
+                            label_cell = (
+                                description_cell
+                                + f"\033[1;38;2;{foreground};48;2;{background}m{badge_text}\033[0m"
+                            )
+                        else:
+                            label_cell = description_cell + f"[{badge_name.center(8)}]"
+                    elif portrait_row == 1:
+                        label_cell = cell(" " + trait, label_width, color)
+                    else:
+                        label_cell = cell(" " + label, label_width, color)
+                    line += edge(" ║ ") + cell(marker, 3, color) + portrait + label_cell
+            status_cell = (
+                heading_cell(right_text, right_width)
+                if right_text.startswith("▣ ")
+                else cell(right_text, right_width, right_color)
+            )
+            line += edge(" ║ ") + status_cell
+            lines.append(line + edge(" ║"))
+    else:
+        for text, color in [*left, ("", "38;2;130;155;171"), *right]:
+            body_cell = heading_cell(text, left_width) if text.startswith("▣ ") else cell(text, left_width, color)
+            lines.append(edge("║ ") + body_cell + edge(" ║"))
+    lines.append(edge("╠" + "═" * (width - 2) + "╣"))
+    lines.append(edge("║ ") + cell("› Type a message to begin.", width - 4, "3;38;2;184;203;212") + edge(" ║"))
+    lines.append(edge("╚" + "═" * (width - 2) + "╝"))
+
+    if scene:
+        ground_rows = 1 if terminal_lines <= 26 else 2
+        lunar = ["░" if (col * 19 + row * 41) % 11 < 3 else "▒" for row in range(ground_rows) for col in range(width)]
+        for row in range(ground_rows):
+            surface = lunar[row * width : (row + 1) * width]
+            for position in (width // 6, width // 2, width * 5 // 6):
+                crater = "◜___◝" if row == 0 else "◟▒▒▒◞"
+                position = min(position, width - len(crater))
+                surface[position : position + len(crater)] = list(crater)
+            lines.append(style("".join(surface), "38;2;126;128;133"))
+        lines.append("")
+    return "\n".join(lines)
 
 
 def format_power_bar(used_tokens: int, capacity_tokens: int, *, width: int = 10) -> str:
@@ -158,19 +423,49 @@ def format_power_bar(used_tokens: int, capacity_tokens: int, *, width: int = 10)
     return f"{'█' * filled}{'░' * (width - filled)} {remaining_percent}%"
 
 
+def print_live_usage(
+    *, context_used: int, context_window: int, run_tokens: int, session_tokens: int
+) -> None:
+    """Show measured model usage and the latest estimated context size."""
+    max_width = max(20, terminal_size((100, 24)).columns - 2)
+    lines = (
+        f"Context ≈{context_used:,}/{context_window:,} · Power {format_power_bar(context_used, context_window)}",
+        f"Tokens · 本轮 {run_tokens:,} · 本次 CLI 会话累计 {session_tokens:,}",
+    )
+    width = min(max_width, max(44, *(_terminal_display_width(line) + 4 for line in lines)))
+    print(_ui_style("\n╭─ PIKA STATUS " + "─" * max(0, width - 16) + "╮", "38;5;117"))
+    for line in lines:
+        fitted = _fit_terminal_text(line, width - 4)
+        print(
+            _ui_style("│", "38;5;117") + " "
+            + _ui_style(fitted, "38;5;252")
+            + " " * (width - 4 - _terminal_display_width(fitted))
+            + " " + _ui_style("│", "38;5;117")
+        )
+    print(_ui_style("╰" + "─" * (width - 2) + "╯", "38;5;117"))
+
+
 def print_startup_status(
     rows: Sequence[tuple[str, str]],
     *,
     notices: Sequence[str] = (),
+    compact: bool = False,
 ) -> None:
-    use_color = (
-        getattr(sys.stdout, "isatty", lambda: False)()
-        and not os.environ.get("NO_COLOR")
-    )
+    use_color = _terminal_ui_color_enabled()
     accent_color = "38;5;117"
 
     def style(text: str, code: str) -> str:
         return f"\033[{code}m{text}\033[0m" if use_color else text
+
+    if compact:
+        width = max(20, terminal_size((80, 24)).columns - 2)
+        for start in range(0, len(rows), 2):
+            line = " · ".join(f"{label}：{value}" for label, value in rows[start : start + 2])
+            print(style(_fit_terminal_text(line, width), "38;5;252"))
+        for notice in notices:
+            print(f"{style('提醒：', '38;5;214')}{notice}")
+        print(style("输入任务开始工作 · /help 查看命令 · /exit 退出", "38;5;245"))
+        return
 
     print()
     for label, value in rows:
@@ -185,7 +480,7 @@ def print_startup_status(
 
 def print_conversation_divider(label: str = "会话") -> None:
     """Print a visible boundary between conversations or input turns."""
-    columns = shutil.get_terminal_size((80, 24)).columns
+    columns = terminal_size((80, 24)).columns
     width = max(48, min(columns, 120))
     marker = f" {label} "
     remaining = max(0, width - len(marker) - 2)
@@ -365,9 +660,21 @@ async def _test_connection(settings: ModelConfig, provider: ModelProvider) -> fl
         await adapter.close()
 
 
+def _terminal_ui_color_enabled() -> bool:
+    """Keep Pikachu's iTerm UI colored even when NO_COLOR is inherited."""
+    if not getattr(sys.stdout, "isatty", lambda: False)():
+        return False
+    if not os.environ.get("NO_COLOR"):
+        return True
+    return (
+        os.environ.get("TERM_PROGRAM", "").lower() == "iterm.app"
+        or os.environ.get("LC_TERMINAL") == "iTerm2"
+    )
+
+
 def _ui_style(text: str, code: str) -> str:
-    """Apply terminal color only when the CLI is attached to a TTY."""
-    if not getattr(sys.stdout, "isatty", lambda: False)() or os.environ.get("NO_COLOR"):
+    """Apply terminal color when Pikachu's UI supports it."""
+    if not _terminal_ui_color_enabled():
         return text
     return f"\033[{code}m{text}\033[0m"
 
@@ -422,16 +729,21 @@ def print_agent_event(event: AgentEvent) -> None:
         )
     elif event.type == "model_completed":
         tool_count = len(event.message.tool_calls) if event.message else 0
+        usage = event.usage
+        usage_line = (
+            f"本次调用：输入 {usage.input_tokens:,} · 输出 {usage.output_tokens:,} · 合计 {usage.total_tokens:,} tokens"
+            if usage is not None else None
+        )
         if tool_count:
             names = ", ".join(call.name for call in event.message.tool_calls)
             _print_event_block(
                 f"model · tool calls{step}",
-                [f"请求 {tool_count} 个工具：{names}"],
+                [f"请求 {tool_count} 个工具：{names}", *([usage_line] if usage_line else [])],
                 color="38;5;117", title_color="38;5;117",
             )
         else:
             _print_event_block(
-                "model · completed", ["模型已返回回复"],
+                "model · completed", ["模型已返回回复", *([usage_line] if usage_line else [])],
                 color="38;5;117", title_color="38;5;117",
             )
     elif event.type == "run_budget_warning":
@@ -693,4 +1005,4 @@ def print_help() -> None:
     )
 
 
-__all__ = ['print_banner', 'format_power_bar', 'print_startup_status', 'print_conversation_divider', 'run_setup', 'save_search_api_key', 'print_agent_event', 'print_assistant_message', 'print_recovered_runs', 'print_memories', 'print_memory', 'print_permission_rules', 'print_checkpoints', 'print_trace', 'print_help']
+__all__ = ['print_banner', 'format_power_bar', 'print_live_usage', 'print_startup_status', 'print_conversation_divider', 'run_setup', 'save_search_api_key', 'print_agent_event', 'print_assistant_message', 'print_recovered_runs', 'print_memories', 'print_memory', 'print_permission_rules', 'print_checkpoints', 'print_trace', 'print_help']

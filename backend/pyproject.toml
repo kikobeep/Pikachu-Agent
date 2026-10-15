@@ -19,6 +19,7 @@ dependencies = [
     "requests>=2.0",
     "tiktoken>=0.7",
     "tqdm>=4.0",
+    "Pillow>=11.0",
 ]
 
 [project.optional-dependencies]
@@ -32,3 +33,6 @@ pikachu = "app.main:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.interfaces.cli" = ["assets/*.png", "assets/*LICENSE.txt", "assets/*.mjs"]

@@ -97,6 +97,7 @@ class ConversationService:
         event_handler: AgentEventHandler | None = None,
         on_run_started: Any | None = None,
         mode: AgentMode = AgentMode.DEFAULT,
+        additional_system_prompt: str | None = None,
     ) -> DispatchResult:
 
         trigger = trigger or TriggerContext(
@@ -110,6 +111,7 @@ class ConversationService:
                 event_handler=event_handler,
                 on_run_started=on_run_started,
                 mode=mode,
+                additional_system_prompt=additional_system_prompt,
             )
 
     async def compact(
@@ -189,6 +191,7 @@ class ConversationService:
         event_handler: AgentEventHandler | None,
         on_run_started: Any | None,
         mode: AgentMode,
+        additional_system_prompt: str | None,
     ) -> DispatchResult:
         '''
         读取旧对话，执行这次输入，再保存新对话
@@ -231,6 +234,7 @@ class ConversationService:
             scheduled_for=trigger.scheduled_for,
             triggered_at=trigger.triggered_at,
             mode=mode,
+            additional_system_prompt=additional_system_prompt,
         )
         try:
             run = await self._run_manager.wait(run_id)

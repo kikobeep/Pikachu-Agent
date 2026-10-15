@@ -175,6 +175,7 @@ class AgentRuntime:
         recovery_run_id: str | None = None,
         mode: AgentMode = AgentMode.DEFAULT,
         source: str | None = None,
+        additional_system_prompt: str | None = None,
     ) -> AgentResult:
 
         run_id = run_id or uuid4().hex
@@ -218,7 +219,10 @@ class AgentRuntime:
                     summary_state=summary_state,
                     recovery_checkpoint=recovery_checkpoint,
                     mode=mode,
-                    additional_system_prompt=ace_selection.prompt() or None,
+                    additional_system_prompt="\n\n".join(
+                        part for part in (additional_system_prompt, ace_selection.prompt())
+                        if part
+                    ) or None,
                 )
                 if self._ace is not None:
                     ace_selection = self._ace.resolve_selection(

@@ -14,6 +14,10 @@ Understand → Act → Verify → Recover → Learn
 
 These recordings show Pikachu running in the local TUI.
 
+- CLI welcome screen in iTerm2
+
+![Pikachu CLI welcome screen with the Earthrise background and mode selector](docs/demos/cli-welcome.png)
+
 - PLAN MODE and sequential plan execution
 
 ![PLAN MODE and sequential plan execution](docs/demos/plan_mode_3x_hd.gif)

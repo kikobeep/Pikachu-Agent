@@ -69,14 +69,14 @@ def parse_model_output(
     """解析 JSON envelope；模型偶尔返回普通文本时保留为最终回答。"""
 
     text = (content or "").strip()
-    if not text:
-        return LightModelEnvelope(tool_calls=tuple(native_tool_calls))
     native_calls = tuple(
         LightToolCall.model_validate(
             call.model_dump() if hasattr(call, "model_dump") else call
         )
         for call in native_tool_calls
     )
+    if not text:
+        return LightModelEnvelope(tool_calls=native_calls)
     try:
         payload = _decode_json_object(text)
     except (TypeError, ValueError, json.JSONDecodeError):

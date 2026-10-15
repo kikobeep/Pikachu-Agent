@@ -24,9 +24,11 @@ from .cli_ui import (
     print_assistant_message as _print_assistant_message,
     format_power_bar,
     print_banner,
+    print_live_usage,
     print_conversation_divider,
     print_help,
     print_startup_status,
+    terminal_size,
     run_setup,
     save_search_api_key,
     print_checkpoints as _print_checkpoints,
@@ -38,6 +40,50 @@ from .cli_ui import (
 )
 
 from app.plan import DEFAULT_PLANS_DIR
+
+
+_AGENT_MODES = {
+    "1": AgentMode.DEFAULT,
+    "2": AgentMode.DEFAULT,
+    "3": AgentMode.PLAN,
+    "4": AgentMode.LIGHT,
+}
+_AGENT_NAMES = {
+    "1": "路卡利欧 · 编码优先",
+    "2": "胖丁 · 创作优先",
+    "3": "可达鸭 · PLAN MODE",
+    "4": "皮卡丘 · LIGHT MODE",
+}
+_AGENT_PROMPTS = {
+    "1": (
+        "当前 CLI 偏好：编码与工程任务。优先理解接口约束，做最小正确实现，"
+        "并运行有针对性的验证。其他任务仍按用户要求处理。"
+    ),
+    "2": (
+        "当前 CLI 偏好：创作与表达任务。写作时优先给出具体、连贯、有辨识度的内容；"
+        "涉及事实的请求仍应核实，不要虚构。其他任务仍按用户要求处理。"
+    ),
+}
+
+
+def _print_current_banner(app, history, mode, session_tokens: int, selected_agent: str) -> None:
+    context_window = app.context_manager.context_window_for(app.provider, app.model)
+    context_used = default_token_estimator().estimate_request(
+        history,
+        tools=tuple(app.tool_registry.definitions_for_mode(mode)),
+        model=app.model,
+        provider=app.provider,
+    )
+    print_banner(
+        status=(
+            ("Model", f"{app.provider}/{app.model}"),
+            ("Power", format_power_bar(context_used, context_window)),
+            ("Context", f"{context_used:,} / {context_window:,}"),
+            ("Mode", mode.value),
+            ("Tokens", f"本次 CLI 会话 {session_tokens:,}"),
+        ),
+        selected_agent=selected_agent,
+    )
 
 
 class CliEventHandler:
@@ -168,15 +214,18 @@ async def _run(args,*,offer_setup: bool = True,):
             model=model,
             provider=provider,
         )
-        print_banner(
+        image_banner = print_banner(
             status=(
                 ("Model", f"{provider}/{model}"),
                 ("Power", format_power_bar(context_used, context_window)),
                 ("Context", f"{context_used:,} / {context_window:,}"),
                 ("Mode", initial_mode.value),
-            )
+                ("Tokens", "本次 CLI 会话 0"),
+            ),
+            selected_agent=("4" if initial_mode is AgentMode.LIGHT else "3" if initial_mode is AgentMode.PLAN else "1"),
         )
 
+        compact_welcome = image_banner and terminal_size((100, 24)).lines < 34
         print_startup_status(
             (
                 ("主模型", f"{provider}/{model}"),
@@ -193,19 +242,21 @@ async def _run(args,*,offer_setup: bool = True,):
                     f"{reflection_provider}/{reflection_model}",
                 ),
                 # ("技能学习", learning_status),
-            )
+            ),
             # notices=notices,
+            compact=compact_welcome,
         )
-        print_conversation_divider(
-            f"{conversation.title} · {conversation.id[:8]}"
-        )
+        if not compact_welcome:
+            print_conversation_divider(
+                f"{conversation.title} · {conversation.id[:8]}"
+            )
 
         if app.reconciled_runs:
             _print_recovered_runs(app.reconciled_runs)
     
         # 模式一：发送一条消息后退出。
         if args.message is not None:
-            success, conversation = await _send_message(
+            success, conversation, run_tokens = await _send_message(
                 conversation_service=conversation_service,
                 conversation_store=conversation_store,
                 conversation=conversation,
@@ -215,7 +266,18 @@ async def _run(args,*,offer_setup: bool = True,):
                 model=model,
                 mode=initial_mode,
             )
-            await _skill_mining(skill_miner)
+            context_used = default_token_estimator().estimate_request(
+                history,
+                tools=visible_tools,
+                model=model,
+                provider=provider,
+            )
+            print_live_usage(
+                context_used=context_used,
+                context_window=context_window,
+                run_tokens=run_tokens,
+                session_tokens=run_tokens,
+            )
             return 0 if success else 1
 
         # 模式二：持续读取用户输入。
@@ -227,11 +289,20 @@ async def _run(args,*,offer_setup: bool = True,):
             mode=initial_mode,
         )
     finally:
-        await app.close()
+        try:
+            await app.close()
+        finally:
+            from .image_banner import clear_image_banner
+
+            clear_image_banner()
 
 
 async def _run_interactive(*, app, conversation, history, system_prompt, mode) -> int:
     """读取输入：命令交给命令处理函数，普通消息交给会话服务。"""
+    session_tokens = 0
+    banner_size = terminal_size((100, 24))
+    default_agent = "1"
+    selected_agent = "4" if mode is AgentMode.LIGHT else "3" if mode is AgentMode.PLAN else default_agent
     while True:
         try:
             content = (await asyncio.to_thread(input, "\n你> ")).strip()
@@ -239,26 +310,43 @@ async def _run_interactive(*, app, conversation, history, system_prompt, mode) -
             print("\n聊天已结束。")
             return 0
 
+        current_size = terminal_size((100, 24))
+        if current_size != banner_size:
+            banner_size = current_size
+            _print_current_banner(app, history, mode, session_tokens, selected_agent)
+
         if not content:
             continue
         if content in {"/exit", "/quit"}:
             print("聊天已结束。")
             return 0
 
+        if content in _AGENT_MODES:
+            selected_agent = content
+            mode = _AGENT_MODES[content]
+            if content in {"1", "2"}:
+                default_agent = content
+            print(f"已选择 {_AGENT_NAMES[content]}")
+            continue
+
         if content in {"/plan", "/plan on"}:
             mode = AgentMode.PLAN
+            selected_agent = "3"
             print("已进入 PLAN MODE：只分析和制定计划，不修改文件或执行命令。")
             continue
         if content in {"/light", "/light on"}:
             mode = AgentMode.LIGHT
+            selected_agent = "4"
             print("已进入 LIGHT MODE：使用执行状态而不是完整历史对话驱动当前 Run。")
             continue
         if content == "/light off":
             mode = AgentMode.DEFAULT
+            selected_agent = default_agent
             print("已退出 LIGHT MODE：恢复普通执行模式。")
             continue
         if content in {"/plan off", "/execute"}:
             mode = AgentMode.DEFAULT
+            selected_agent = default_agent
             print("已退出 PLAN MODE：恢复普通执行模式。")
             continue
 
@@ -272,7 +360,7 @@ async def _run_interactive(*, app, conversation, history, system_prompt, mode) -
         if handled:
             continue
 
-        _, conversation = await _send_message(
+        _, conversation, run_tokens = await _send_message(
             conversation_service=app.conversation_service,
             conversation_store=app.conversation_store,
             conversation=conversation,
@@ -281,6 +369,21 @@ async def _run_interactive(*, app, conversation, history, system_prompt, mode) -
             content=content,
             model=app.model,
             mode=mode,
+            additional_system_prompt=_AGENT_PROMPTS.get(selected_agent),
+        )
+        session_tokens += run_tokens
+        context_window = app.context_manager.context_window_for(app.provider, app.model)
+        context_used = default_token_estimator().estimate_request(
+            history,
+            tools=tuple(app.tool_registry.definitions_for_mode(mode)),
+            model=app.model,
+            provider=app.provider,
+        )
+        print_live_usage(
+            context_used=context_used,
+            context_window=context_window,
+            run_tokens=run_tokens,
+            session_tokens=session_tokens,
         )
 
 
@@ -342,7 +445,7 @@ async def _handle_command(content, *, app, conversation, history, system_prompt)
         print("上下文已清空。")
         return True, conversation, history
     if content == "/compact":
-        decision = await app.conversation_service.compact(
+        await app.conversation_service.compact(
             conversation_id=conversation.id,
             context_manager=app.context_manager,
             tools=tuple(
@@ -389,19 +492,23 @@ async def _send_message(
     content: str,
     model: str,
     mode: AgentMode,
-) -> tuple[bool, Conversation]:
+    additional_system_prompt: str | None = None,
+) -> tuple[bool, Conversation, int]:
 
     try:
-        dispatch = await conversation_service.dispatch(
+        dispatch_kwargs = dict(
             conversation_id=conversation.id,
             content=content,
             trigger=TriggerContext(source=ConversationSource.MANUAL),
             event_handler=CliEventHandler(),
             mode=mode,
         )
+        if additional_system_prompt:
+            dispatch_kwargs["additional_system_prompt"] = additional_system_prompt
+        dispatch = await conversation_service.dispatch(**dispatch_kwargs)
     except KeyboardInterrupt:
         print("\n[cancel] 已取消当前 Run。")
-        return False, conversation
+        return False, conversation, 0
 
     result = dispatch.result
     
@@ -427,7 +534,7 @@ async def _send_message(
         _print_assistant_message(result.final_message.content)
     if dispatch.run.status.value == "cancelled":
         print("[Run 已被取消]")
-    return result.ok, conversation
+    return result.ok, conversation, result.usage.total_tokens
 
 
 async def _load_or_create_conversation(

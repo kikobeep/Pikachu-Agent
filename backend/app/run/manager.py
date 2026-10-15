@@ -114,6 +114,7 @@ class RunManager:
         scheduled_for: datetime | None = None,
         triggered_at: datetime | None = None,
         mode: AgentMode = AgentMode.DEFAULT,
+        additional_system_prompt: str | None = None,
     ) -> tuple[str, asyncio.Task[None]]:
     
         run = await self._run_store.create(
@@ -137,6 +138,7 @@ class RunManager:
                 event_handler=event_handler,
                 recovery_run_id=recovery_run_id,
                 mode=mode,
+                additional_system_prompt=additional_system_prompt,
             )
         )
         self._active_tasks[run.id] = task
@@ -270,6 +272,7 @@ class RunManager:
         event_handler: AgentEventHandler | None,
         recovery_run_id: str | None,
         mode: AgentMode,
+        additional_system_prompt: str | None,
     ) -> None:
         try:
             try:
@@ -283,6 +286,7 @@ class RunManager:
                     run_id=run_id,
                     recovery_run_id=recovery_run_id,
                     mode=mode,
+                    additional_system_prompt=additional_system_prompt,
                     source=(await self._run_store.require(run_id)).source,
                 )
             except asyncio.CancelledError:
