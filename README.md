@@ -20,19 +20,28 @@ These recordings show Pikachu running in the local TUI.
 
 - PLAN MODE and sequential plan execution
 
-![PLAN MODE and sequential plan execution](docs/demos/plan_mode_3x_hd.gif)
+![PLAN MODE and sequential plan execution](docs/demos/cli-session-3x.gif)
 
 [Download the PLAN MODE demo video](docs/demos/plan_mode.mp4)
 
 - Memory
 
-![Context compaction and summary](docs/demos/compact_demo_3x_hd.gif)
-
-[Download the context compaction demo video](docs/demos/compact_demo.mp4)
+<table>
+  <tr>
+    <th width="50%">Create a memory</th>
+    <th width="50%">Search a memory</th>
+  </tr>
+  <tr>
+    <td><a href="docs/demos/memory_create_3x.gif"><img src="docs/demos/memory_create_3x.gif" alt="Creating a memory in Pikachu CLI" width="100%"></a></td>
+    <td><a href="docs/demos/memory_search_3x.gif"><img src="docs/demos/memory_search_3x.gif" alt="Searching for a saved memory in Pikachu CLI" width="100%"></a></td>
+  </tr>
+</table>
 
 - Context compaction and summary
 
-![Pikachu context compaction summary](docs/demos/compact_demo.png)
+![Pikachu context compaction summary](docs/demos/compact.gif)
+
+[Download the context compaction demo video](docs/demos/compact_demo.mp4)
 
 ## Contents
 
